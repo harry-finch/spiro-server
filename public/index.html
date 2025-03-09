@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Raspberry Pi LED & Camera Control</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Raspberry Pi LED & Camera Control</h1>
+      <div id="status-indicator">
+        <span id="connection-status">Disconnected</span>
+      </div>
+    </header>
+    
+    <main>
+      <section class="control-panel">
+        <div class="panel led-panel">
+          <h2>LED Control</h2>
+          
+          <div class="control-group">
+            <label for="color-picker">Color:</label>
+            <input type="color" id="color-picker" value="#ff0000">
+          </div>
+          
+          <div class="control-group">
+            <label for="brightness-slider">Brightness:</label>
+            <input type="range" id="brightness-slider" min="0" max="255" value="255">
+            <span id="brightness-value">255</span>
+          </div>
+          
+          <div class="control-group">
+            <label for="pattern-select">Pattern:</label>
+            <select id="pattern-select">
+              <option value="solid">Solid Color</option>
+              <option value="rainbow">Rainbow</option>
+              <option value="pulse">Pulse</option>
+              <option value="chase">Chase</option>
+              <option value="alternating">Alternating</option>
+            </select>
+          </div>
+          
+          <button id="led-off-btn" class="btn danger">Turn Off LEDs</button>
+        </div>
+        
+        <div class="panel camera-panel">
+          <h2>Camera Control</h2>
+          
+          <div class="camera-preview">
+            <img id="camera-image" src="placeholder.jpg" alt="Camera Preview">
+          </div>
+          
+          <div class="camera-controls">
+            <button id="take-picture-btn" class="btn primary">Take Picture</button>
+            <button id="toggle-stream-btn" class="btn secondary">Start Stream</button>
+          </div>
+          
+          <div class="control-group">
+            <label for="camera-rotation">Rotation:</label>
+            <select id="camera-rotation">
+              <option value="0">0°</option>
+              <option value="90">90°</option>
+              <option value="180">180°</option>
+              <option value="270">270°</option>
+            </select>
+          </div>
+        </div>
+      </section>
+      
+      <section class="gallery">
+        <h2>Image Gallery</h2>
+        <div id="image-gallery" class="image-grid"></div>
+      </section>
+    </main>
+    
+    <footer>
+      <p>Raspberry Pi LED & Camera Control | <span id="server-time"></span></p>
+    </footer>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
