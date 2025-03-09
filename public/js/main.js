@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const cameraRotation = document.getElementById('camera-rotation');
   const imageGallery = document.getElementById('image-gallery');
   const serverTime = document.getElementById('server-time');
+  const themeToggle = document.getElementById('theme-toggle');
   
   // Socket.io connection
   const socket = io();
@@ -289,4 +290,25 @@ document.addEventListener('DOMContentLoaded', () => {
   
   setInterval(updateServerTime, 1000);
   updateServerTime();
+  
+  // Theme toggle functionality
+  const isDarkMode = localStorage.getItem('darkMode') === 'true';
+  if (isDarkMode) {
+    document.documentElement.classList.add('dark-mode');
+    themeToggle.textContent = '☀️ Light Mode';
+  } else {
+    document.documentElement.classList.remove('dark-mode');
+    themeToggle.textContent = '🌙 Dark Mode';
+  }
+  
+  themeToggle.addEventListener('click', () => {
+    const isDarkMode = document.documentElement.classList.toggle('dark-mode');
+    localStorage.setItem('darkMode', isDarkMode);
+    
+    if (isDarkMode) {
+      themeToggle.textContent = '☀️ Light Mode';
+    } else {
+      themeToggle.textContent = '🌙 Dark Mode';
+    }
+  });
 });
