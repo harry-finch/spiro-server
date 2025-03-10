@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const RaspiCam = require('raspicam');
+const { StillCamera, StreamCamera, Codec } = require('pi-camera-connect');
 const dotenv = require('dotenv');
 
 dotenv.config();
@@ -12,14 +12,12 @@ const config = {
   width: parseInt(process.env.CAMERA_WIDTH) || 640,
   height: parseInt(process.env.CAMERA_HEIGHT) || 480,
   quality: 85,
-  encoding: 'jpg',
-  timeout: 0, // For streaming
-  framerate: 24,
-  rotation: 0
+  rotation: 0,
+  framerate: 24
 };
 
 // Camera state
-let camera = null;
+let streamCamera = null;
 let isStreaming = false;
 let streamSocket = null;
 let streamInterval = null;
@@ -38,7 +36,7 @@ function init() {
       fs.mkdirSync(outputDir, { recursive: true });
     }
     
-    // Check if ArduCAM is connected
+    // Check if camera is connected
     exec('vcgencmd get_camera', (error, stdout, stderr) => {
       if (error) {
         console.error('Error checking camera:', error);
@@ -57,121 +55,115 @@ function init() {
 }
 
 // Take a picture with the camera
-function takePicture() {
-  return new Promise((resolve, reject) => {
-    if (!config.enabled) {
-      reject(new Error('Camera is disabled in configuration'));
-      return;
-    }
-    
-    const timestamp = Date.now();
-    const filename = `image_${timestamp}.jpg`;
-    const outputPath = path.join(outputDir, filename);
-    const relativePath = `/images/${filename}`;
-    
-    // Create a new camera instance for this picture
-    const options = {
-      mode: 'photo',
-      output: outputPath,
+async function takePicture() {
+  if (!config.enabled) {
+    throw new Error('Camera is disabled in configuration');
+  }
+  
+  const timestamp = Date.now();
+  const filename = `image_${timestamp}.jpg`;
+  const outputPath = path.join(outputDir, filename);
+  const relativePath = `/images/${filename}`;
+  
+  try {
+    // Create a new still camera instance
+    const stillCamera = new StillCamera({
       width: config.width,
       height: config.height,
-      quality: config.quality,
-      encoding: config.encoding,
       rotation: config.rotation
-    };
-    
-    const cam = new RaspiCam(options);
-    
-    cam.on('start', () => {
-      console.log('Starting to take picture');
     });
     
-    cam.on('read', (err, timestamp, filename) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      
-      console.log(`Picture taken: ${filename}`);
-      resolve(relativePath);
-      cam.stop();
-    });
+    console.log('Starting to take picture');
     
-    cam.on('exit', () => {
-      console.log('Camera process exited');
-    });
+    // Capture image as buffer
+    const image = await stillCamera.takeImage();
     
-    cam.start();
-  });
+    // Save the image to file
+    fs.writeFileSync(outputPath, image);
+    
+    console.log(`Picture taken: ${filename}`);
+    return relativePath;
+  } catch (error) {
+    console.error('Error taking picture:', error);
+    throw error;
+  }
 }
 
 // Start video streaming
-function startStream(socket) {
+async function startStream(socket) {
   if (!config.enabled) {
     socket.emit('camera:error', { message: 'Camera is disabled in configuration' });
     return;
   }
   
   if (isStreaming) {
-    stopStream();
+    await stopStream();
   }
   
-  isStreaming = true;
-  streamSocket = socket;
-  
-  const streamOptions = {
-    mode: 'timelapse',
-    output: path.join(outputDir, 'stream_frame.jpg'),
-    width: config.width,
-    height: config.height,
-    quality: 60, // Lower quality for streaming
-    encoding: config.encoding,
-    rotation: config.rotation,
-    timelapse: 250 // Take a frame every 250ms
-  };
-  
-  camera = new RaspiCam(streamOptions);
-  
-  camera.on('read', (err, timestamp, filename) => {
-    if (err) {
-      console.error('Error reading stream frame:', err);
-      return;
-    }
+  try {
+    isStreaming = true;
+    streamSocket = socket;
     
-    if (streamSocket && isStreaming) {
-      const framePath = path.join(outputDir, 'stream_frame.jpg');
-      
-      fs.readFile(framePath, (err, data) => {
-        if (err) {
-          console.error('Error reading frame file:', err);
-          return;
+    // Create a new stream camera instance
+    streamCamera = new StreamCamera({
+      width: config.width,
+      height: config.height,
+      rotation: config.rotation,
+      fps: config.framerate,
+      codec: Codec.JPEG
+    });
+    
+    // Start the camera stream
+    await streamCamera.startCapture();
+    
+    // Set up interval to capture frames
+    streamInterval = setInterval(async () => {
+      if (streamSocket && isStreaming) {
+        try {
+          // Capture a frame
+          const frameBuffer = await streamCamera.takeImage();
+          
+          // Convert to base64 and send to client
+          const base64Image = `data:image/jpeg;base64,${frameBuffer.toString('base64')}`;
+          streamSocket.emit('camera:frame', { image: base64Image });
+        } catch (error) {
+          console.error('Error capturing stream frame:', error);
         }
-        
-        const base64Image = `data:image/jpeg;base64,${data.toString('base64')}`;
-        streamSocket.emit('camera:frame', { image: base64Image });
-      });
-    }
-  });
-  
-  camera.start();
-  
-  console.log('Camera streaming started');
-  socket.emit('camera:streamStarted');
+      }
+    }, 100); // 10 frames per second
+    
+    console.log('Camera streaming started');
+    socket.emit('camera:streamStarted');
+  } catch (error) {
+    console.error('Error starting stream:', error);
+    socket.emit('camera:error', { message: error.message });
+    isStreaming = false;
+    streamSocket = null;
+  }
 }
 
 // Stop video streaming
-function stopStream() {
-  if (camera && isStreaming) {
-    camera.stop();
-    camera = null;
-    isStreaming = false;
-    
-    if (streamSocket) {
-      streamSocket.emit('camera:streamStopped');
-      streamSocket = null;
+async function stopStream() {
+  if (streamCamera && isStreaming) {
+    try {
+      if (streamInterval) {
+        clearInterval(streamInterval);
+        streamInterval = null;
+      }
+      
+      await streamCamera.stopCapture();
+      streamCamera = null;
+      isStreaming = false;
+      
+      if (streamSocket) {
+        streamSocket.emit('camera:streamStopped');
+        streamSocket = null;
+      }
+      
+      console.log('Camera streaming stopped');
+    } catch (error) {
+      console.error('Error stopping stream:', error);
     }
-    
-    console.log('Camera streaming stopped');
   }
 }
 
@@ -183,21 +175,23 @@ function getSettings() {
     height: config.height,
     quality: config.quality,
     rotation: config.rotation,
+    framerate: config.framerate,
     isStreaming: isStreaming
   };
 }
 
 // Update camera settings
-function updateSettings(settings) {
+async function updateSettings(settings) {
   if (settings.width) config.width = parseInt(settings.width);
   if (settings.height) config.height = parseInt(settings.height);
   if (settings.quality) config.quality = parseInt(settings.quality);
   if (settings.rotation !== undefined) config.rotation = parseInt(settings.rotation);
+  if (settings.framerate) config.framerate = parseInt(settings.framerate);
   
   // If we're streaming, restart the stream with new settings
   if (isStreaming && streamSocket) {
-    stopStream();
-    startStream(streamSocket);
+    await stopStream();
+    await startStream(streamSocket);
   }
   
   return getSettings();
@@ -213,9 +207,9 @@ function getStatus() {
 }
 
 // Clean up resources when shutting down
-function cleanup() {
-  if (camera) {
-    stopStream();
+async function cleanup() {
+  if (isStreaming) {
+    await stopStream();
   }
 }
 
