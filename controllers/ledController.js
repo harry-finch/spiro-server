@@ -1,4 +1,5 @@
-const ws281x = require('rpi-ws281x-native');
+const five = require('johnny-five');
+const pixel = require('node-pixel');
 const dotenv = require('dotenv');
 
 dotenv.config();
@@ -6,16 +7,20 @@ dotenv.config();
 // LED strip configuration
 const config = {
   ledCount: parseInt(process.env.LED_COUNT) || 60,
-  gpioPin: parseInt(process.env.LED_PIN) || 18,
-  brightness: parseInt(process.env.LED_BRIGHTNESS) || 255
+  pin: process.env.LED_PIN || 6,         // Data pin (D6 by default)
+  controller: process.env.LED_CONTROLLER || 'FIRMATA',
+  stripType: process.env.LED_STRIP_TYPE || 'WS2812',
+  brightness: parseInt(process.env.LED_BRIGHTNESS) || 100  // 0-100 for node-pixel
 };
 
 // LED strip state
+let strip = null;
+let board = null;
 let currentColor = { r: 0, g: 0, b: 0 };
 let currentBrightness = config.brightness;
 let currentPattern = 'solid';
 let patternInterval = null;
-let pixels = new Uint32Array(config.ledCount);
+let isReady = false;
 
 // Available patterns
 const patterns = {
@@ -26,45 +31,97 @@ const patterns = {
   alternating: { name: 'Alternating', description: 'Alternate between two colors' }
 };
 
-// Helper function to convert RGB to the format needed by the LED library
-function rgbToHex(r, g, b) {
-  return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
-}
-
 // Initialize the LED strip
 function init() {
-  try {
-    ws281x.init(config.ledCount, { gpioPin: config.gpioPin });
-    ws281x.setBrightness(currentBrightness);
-    console.log(`LED strip initialized with ${config.ledCount} LEDs on GPIO pin ${config.gpioPin}`);
-    setColor(0, 0, 0); // Turn off all LEDs initially
-  } catch (error) {
-    console.error('Failed to initialize LED strip:', error);
-  }
+  return new Promise((resolve, reject) => {
+    try {
+      // Initialize Johnny-Five board
+      board = new five.Board({
+        repl: false,
+        debug: false
+      });
+
+      board.on('ready', () => {
+        console.log('Board connected');
+        
+        // Initialize the LED strip
+        strip = new pixel.Strip({
+          board: board,
+          controller: config.controller,
+          strips: [{ pin: config.pin, length: config.ledCount }],
+          gamma: 2.8
+        });
+
+        strip.on('ready', () => {
+          console.log(`LED strip initialized with ${config.ledCount} LEDs on pin ${config.pin}`);
+          
+          // Set initial brightness
+          strip.brightness(currentBrightness / 100);  // node-pixel uses 0-1 for brightness
+          
+          // Turn off all LEDs initially
+          setColor(0, 0, 0);
+          
+          isReady = true;
+          resolve();
+        });
+
+        strip.on('error', (err) => {
+          console.error('LED strip error:', err);
+          reject(err);
+        });
+      });
+
+      board.on('error', (err) => {
+        console.error('Board error:', err);
+        reject(err);
+      });
+    } catch (error) {
+      console.error('Failed to initialize LED strip:', error);
+      reject(error);
+    }
+  });
 }
 
 // Set all LEDs to a single color
 function setColor(r, g, b) {
-  currentColor = { r, g, b };
-  const colorValue = rgbToHex(r, g, b);
-  
-  for (let i = 0; i < config.ledCount; i++) {
-    pixels[i] = colorValue;
+  if (!isReady) {
+    console.warn('LED strip not ready');
+    return currentColor;
   }
   
-  ws281x.render(pixels);
+  currentColor = { r, g, b };
+  
+  // Set all pixels to the same color
+  strip.color(`rgb(${r}, ${g}, ${b})`);
+  strip.show();
+  
   return currentColor;
 }
 
 // Set the brightness of the LED strip
 function setBrightness(brightness) {
-  currentBrightness = Math.max(0, Math.min(255, brightness));
-  ws281x.setBrightness(currentBrightness);
+  if (!isReady) {
+    console.warn('LED strip not ready');
+    return currentBrightness;
+  }
+  
+  // Ensure brightness is between 0-100
+  currentBrightness = Math.max(0, Math.min(100, brightness));
+  
+  // node-pixel uses 0-1 for brightness
+  strip.brightness(currentBrightness / 100);
+  strip.show();
+  
   return currentBrightness;
 }
 
 // Set a pattern for the LED strip
 function setPattern(pattern) {
+  if (!isReady) {
+    console.warn('LED strip not ready');
+    return currentPattern;
+  }
+  
   // Clear any existing pattern interval
   if (patternInterval) {
     clearInterval(patternInterval);
@@ -76,7 +133,7 @@ function setPattern(pattern) {
   // If pattern is 'solid', just keep the current color
   if (pattern === 'solid') {
     setColor(currentColor.r, currentColor.g, currentColor.b);
-    return;
+    return currentPattern;
   }
   
   // Set up the new pattern
@@ -87,10 +144,10 @@ function setPattern(pattern) {
         for (let i = 0; i < config.ledCount; i++) {
           const hue = ((i + offset) % 360) / 360;
           const { r, g, b } = hsvToRgb(hue, 1, 1);
-          pixels[i] = rgbToHex(r, g, b);
+          strip.pixel(i).color(`rgb(${r}, ${g}, ${b})`);
         }
         offset = (offset + 1) % 360;
-        ws281x.render(pixels);
+        strip.show();
       }, 50);
       break;
       
@@ -117,42 +174,37 @@ function setPattern(pattern) {
         const g = Math.floor(currentColor.g * factor);
         const b = Math.floor(currentColor.b * factor);
         
-        for (let i = 0; i < config.ledCount; i++) {
-          pixels[i] = rgbToHex(r, g, b);
-        }
-        
-        ws281x.render(pixels);
+        strip.color(`rgb(${r}, ${g}, ${b})`);
+        strip.show();
       }, 30);
       break;
       
     case 'chase':
       let position = 0;
       patternInterval = setInterval(() => {
-        for (let i = 0; i < config.ledCount; i++) {
-          if (i === position) {
-            pixels[i] = rgbToHex(currentColor.r, currentColor.g, currentColor.b);
-          } else {
-            pixels[i] = rgbToHex(0, 0, 0);
-          }
-        }
+        strip.off(); // Turn off all LEDs
+        
+        // Turn on just the current position
+        strip.pixel(position).color(`rgb(${currentColor.r}, ${currentColor.g}, ${currentColor.b})`);
         
         position = (position + 1) % config.ledCount;
-        ws281x.render(pixels);
+        strip.show();
       }, 50);
       break;
       
     case 'alternating':
       let state = false;
       patternInterval = setInterval(() => {
-        const color1 = state ? rgbToHex(currentColor.r, currentColor.g, currentColor.b) : rgbToHex(0, 0, 0);
-        const color2 = state ? rgbToHex(0, 0, 0) : rgbToHex(currentColor.r, currentColor.g, currentColor.b);
-        
         for (let i = 0; i < config.ledCount; i++) {
-          pixels[i] = i % 2 === 0 ? color1 : color2;
+          if ((i % 2 === 0 && state) || (i % 2 !== 0 && !state)) {
+            strip.pixel(i).color(`rgb(${currentColor.r}, ${currentColor.g}, ${currentColor.b})`);
+          } else {
+            strip.pixel(i).off();
+          }
         }
         
         state = !state;
-        ws281x.render(pixels);
+        strip.show();
       }, 500);
       break;
       
@@ -195,7 +247,8 @@ function getStatus() {
     color: currentColor,
     brightness: currentBrightness,
     pattern: currentPattern,
-    ledCount: config.ledCount
+    ledCount: config.ledCount,
+    isReady: isReady
   };
 }
 
@@ -208,16 +261,18 @@ function getPatterns() {
 function cleanup() {
   if (patternInterval) {
     clearInterval(patternInterval);
+    patternInterval = null;
   }
   
-  // Turn off all LEDs
-  for (let i = 0; i < config.ledCount; i++) {
-    pixels[i] = 0;
+  if (strip && isReady) {
+    // Turn off all LEDs
+    strip.off();
+    strip.show();
   }
-  ws281x.render(pixels);
   
-  // Reset the LED strip
-  ws281x.reset();
+  if (board) {
+    board.io.reset();
+  }
 }
 
 module.exports = {
