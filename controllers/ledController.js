@@ -3,6 +3,14 @@ const { exec } = require('child_process');
 const dotenv = require('dotenv');
 const path = require('path');
 
+// Try to load the rpi-ws281x-native library
+let ws281x = null;
+try {
+  ws281x = require('rpi-ws281x-native');
+} catch (error) {
+  console.warn('rpi-ws281x-native library not available, falling back to simulation mode');
+}
+
 dotenv.config();
 
 // LED strip configuration
@@ -10,7 +18,7 @@ const config = {
   ledCount: parseInt(process.env.LED_COUNT) || 60,
   pin: parseInt(process.env.LED_PIN) || 18,
   brightness: parseInt(process.env.LED_BRIGHTNESS) || 100,  // 0-100 scale
-  simulation: process.env.LED_SIMULATION === 'true' || true // Default to simulation mode
+  simulation: process.env.LED_SIMULATION === 'true' || !ws281x // Default to hardware mode if library is available
 };
 
 // LED strip state
@@ -32,6 +40,9 @@ const patterns = {
   alternating: { name: 'Alternating', description: 'Alternate between two colors' }
 };
 
+// Hardware-specific variables
+let pixelData = null;
+
 // Initialize the LED strip
 function init() {
   return new Promise((resolve) => {
@@ -42,14 +53,27 @@ function init() {
         console.log('Running in simulation mode');
       } else {
         console.log(`Hardware mode on GPIO pin ${config.pin}`);
-        // Here you would initialize your specific hardware
-        // This would depend on your LED strip type and connection method
+        
+        // Initialize the WS2812 LED strip
+        ws281x.init(config.ledCount, { gpioPin: config.pin });
+        
+        // Create pixel data buffer
+        pixelData = new Uint32Array(config.ledCount);
+        
+        // Set initial brightness (0-255 scale for the library)
+        const hwBrightness = Math.floor(currentBrightness * 2.55); // Convert 0-100 to 0-255
+        ws281x.setBrightness(hwBrightness);
+        
+        console.log(`WS2812 LED strip initialized on GPIO pin ${config.pin}`);
       }
       
       // Set all LEDs to off initially
       for (let i = 0; i < config.ledCount; i++) {
         virtualLEDs[i] = { r: 0, g: 0, b: 0 };
       }
+      
+      // Turn off all LEDs
+      setColor(0, 0, 0);
       
       isReady = true;
       console.log('LED controller initialized successfully');
@@ -62,6 +86,11 @@ function init() {
       resolve();
     }
   });
+}
+
+// Helper function to convert RGB to the format needed by the LED library
+function rgbToHex(r, g, b) {
+  return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
 }
 
 // Set all LEDs to a single color
@@ -84,9 +113,18 @@ function setColor(r, g, b) {
     virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
   }
   
-  if (!config.simulation) {
-    // Here you would send the color to your hardware
-    // This would depend on your LED strip type and connection method
+  if (!config.simulation && ws281x) {
+    // Convert RGB to the format needed by the WS2812 library
+    const colorValue = rgbToHex(scaledR, scaledG, scaledB);
+    
+    // Set all pixels to the same color
+    for (let i = 0; i < config.ledCount; i++) {
+      pixelData[i] = colorValue;
+    }
+    
+    // Send the data to the LED strip
+    ws281x.render(pixelData);
+    
     console.log(`Hardware: Setting all LEDs to RGB(${scaledR},${scaledG},${scaledB})`);
   }
   
@@ -98,6 +136,12 @@ function setColor(r, g, b) {
 function setBrightness(brightness) {
   // Ensure brightness is between 0-100
   currentBrightness = Math.max(0, Math.min(100, brightness));
+  
+  if (!config.simulation && ws281x) {
+    // Convert 0-100 scale to 0-255 scale for the hardware
+    const hwBrightness = Math.floor(currentBrightness * 2.55);
+    ws281x.setBrightness(hwBrightness);
+  }
   
   // Re-apply current color with new brightness
   setColor(currentColor.r, currentColor.g, currentColor.b);
@@ -138,10 +182,15 @@ function setPattern(pattern) {
           const scaledB = Math.floor(b * brightnessScale);
           
           virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
+          
+          // Update hardware if not in simulation mode
+          if (!config.simulation && ws281x) {
+            pixelData[i] = rgbToHex(scaledR, scaledG, scaledB);
+          }
         }
         
-        if (!config.simulation) {
-          // Here you would update your hardware with the new LED values
+        if (!config.simulation && ws281x) {
+          ws281x.render(pixelData);
           console.log('Hardware: Updating rainbow pattern');
         }
         
@@ -177,8 +226,12 @@ function setPattern(pattern) {
           virtualLEDs[i] = { r, g, b };
         }
         
-        if (!config.simulation) {
-          // Here you would update your hardware with the new LED values
+        if (!config.simulation && ws281x) {
+          const colorValue = rgbToHex(r, g, b);
+          for (let i = 0; i < config.ledCount; i++) {
+            pixelData[i] = colorValue;
+          }
+          ws281x.render(pixelData);
           console.log(`Hardware: Pulsing at ${Math.round(factor * 100)}%`);
         }
       }, 30);
@@ -190,6 +243,10 @@ function setPattern(pattern) {
         // Turn off all LEDs
         for (let i = 0; i < config.ledCount; i++) {
           virtualLEDs[i] = { r: 0, g: 0, b: 0 };
+          
+          if (!config.simulation && ws281x) {
+            pixelData[i] = 0; // Off
+          }
         }
         
         // Turn on just the current position
@@ -200,8 +257,9 @@ function setPattern(pattern) {
         
         virtualLEDs[position] = { r, g, b };
         
-        if (!config.simulation) {
-          // Here you would update your hardware with the new LED values
+        if (!config.simulation && ws281x) {
+          pixelData[position] = rgbToHex(r, g, b);
+          ws281x.render(pixelData);
           console.log(`Hardware: Chase at position ${position}`);
         }
         
@@ -217,16 +275,24 @@ function setPattern(pattern) {
         const g = Math.floor(currentColor.g * brightnessScale);
         const b = Math.floor(currentColor.b * brightnessScale);
         
+        const colorValue = rgbToHex(r, g, b);
+        
         for (let i = 0; i < config.ledCount; i++) {
           if ((i % 2 === 0 && state) || (i % 2 !== 0 && !state)) {
             virtualLEDs[i] = { r, g, b };
+            if (!config.simulation && ws281x) {
+              pixelData[i] = colorValue;
+            }
           } else {
             virtualLEDs[i] = { r: 0, g: 0, b: 0 };
+            if (!config.simulation && ws281x) {
+              pixelData[i] = 0; // Off
+            }
           }
         }
         
-        if (!config.simulation) {
-          // Here you would update your hardware with the new LED values
+        if (!config.simulation && ws281x) {
+          ws281x.render(pixelData);
           console.log(`Hardware: Alternating pattern state: ${state}`);
         }
         
@@ -302,9 +368,17 @@ function cleanup() {
     virtualLEDs[i] = { r: 0, g: 0, b: 0 };
   }
   
-  if (!config.simulation) {
-    // Here you would turn off your hardware LEDs
-    console.log('Hardware: Turning off all LEDs');
+  if (!config.simulation && ws281x) {
+    // Turn off all hardware LEDs
+    for (let i = 0; i < config.ledCount; i++) {
+      pixelData[i] = 0;
+    }
+    ws281x.render(pixelData);
+    
+    // Reset the LED strip
+    ws281x.reset();
+    
+    console.log('Hardware: Turning off all LEDs and resetting');
   }
   
   console.log('LED controller cleaned up');
