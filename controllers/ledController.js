@@ -1,15 +1,7 @@
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const dotenv = require('dotenv');
 const path = require('path');
-
-// Try to load the rpi-ws281x-native library
-let ws281x = null;
-try {
-  ws281x = require('rpi-ws281x-native');
-} catch (error) {
-  console.warn('rpi-ws281x-native library not available, falling back to simulation mode');
-}
 
 dotenv.config();
 
@@ -18,7 +10,7 @@ const config = {
   ledCount: parseInt(process.env.LED_COUNT) || 60,
   pin: parseInt(process.env.LED_PIN) || 18,
   brightness: parseInt(process.env.LED_BRIGHTNESS) || 100,  // 0-100 scale
-  simulation: process.env.LED_SIMULATION === 'true' || !ws281x // Default to hardware mode if library is available
+  simulation: process.env.LED_SIMULATION === 'true' || process.platform !== 'linux' // Default to hardware mode on Linux
 };
 
 // LED strip state
@@ -41,7 +33,7 @@ const patterns = {
 };
 
 // Hardware-specific variables
-let pixelData = null;
+let ws2812Process = null;
 
 // Initialize the LED strip
 function init() {
@@ -54,15 +46,20 @@ function init() {
       } else {
         console.log(`Hardware mode on GPIO pin ${config.pin}`);
         
-        // Initialize the WS2812 LED strip
-        ws281x.init(config.ledCount, { gpioPin: config.pin });
+        // Check if we're on a Raspberry Pi
+        if (process.platform !== 'linux') {
+          throw new Error('Hardware mode is only supported on Raspberry Pi (Linux)');
+        }
         
-        // Create pixel data buffer
-        pixelData = new Uint32Array(config.ledCount);
-        
-        // Set initial brightness (0-255 scale for the library)
-        const hwBrightness = Math.floor(currentBrightness * 2.55); // Convert 0-100 to 0-255
-        ws281x.setBrightness(hwBrightness);
+        // Check if the SPI interface is enabled
+        exec('ls /dev/spidev*', (error, stdout) => {
+          if (error || !stdout.trim()) {
+            console.warn('SPI interface not detected. You may need to enable it using raspi-config');
+            config.simulation = true;
+          } else {
+            console.log('SPI interface detected:', stdout.trim());
+          }
+        });
         
         console.log(`WS2812 LED strip initialized on GPIO pin ${config.pin}`);
       }
@@ -93,6 +90,109 @@ function rgbToHex(r, g, b) {
   return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
 }
 
+// Helper function to send data to the WS2812 LEDs using Python's rpi_ws281x library
+function sendToHardware(ledData) {
+  if (config.simulation) return;
+  
+  try {
+    // Kill any existing process
+    if (ws2812Process) {
+      ws2812Process.kill();
+      ws2812Process = null;
+    }
+    
+    // Create a temporary file with LED data
+    const tempFile = path.join(__dirname, '../temp_led_data.json');
+    fs.writeFileSync(tempFile, JSON.stringify({
+      leds: ledData,
+      count: config.ledCount,
+      pin: config.pin,
+      brightness: currentBrightness
+    }));
+    
+    // Run the Python script to control the LEDs
+    const pythonScript = path.join(__dirname, '../scripts/ws2812_control.py');
+    
+    // Create the script if it doesn't exist
+    if (!fs.existsSync(pythonScript)) {
+      const scriptDir = path.dirname(pythonScript);
+      if (!fs.existsSync(scriptDir)) {
+        fs.mkdirSync(scriptDir, { recursive: true });
+      }
+      
+      // Create a Python script that uses rpi_ws281x library
+      const pythonCode = `#!/usr/bin/env python3
+import json
+import sys
+import time
+try:
+    import board
+    import neopixel
+    HAS_LIBRARIES = True
+except ImportError:
+    HAS_LIBRARIES = False
+    print("Warning: Required libraries not found. Install with: pip3 install adafruit-circuitpython-neopixel")
+
+# Read LED data from the temporary file
+with open(sys.argv[1], 'r') as f:
+    data = json.load(f)
+
+led_count = data['count']
+pin = data['pin']
+brightness = data['brightness'] / 100.0  # Convert to 0-1 scale
+led_data = data['leds']
+
+if not HAS_LIBRARIES:
+    print("Simulation mode: Would set", led_count, "LEDs")
+    sys.exit(0)
+
+# Initialize the LED strip
+pixels = neopixel.NeoPixel(
+    board.D${config.pin},  # Use the specified pin
+    led_count,
+    brightness=brightness,
+    auto_write=False
+)
+
+# Set the LED colors
+for i, led in enumerate(led_data):
+    if i < led_count:
+        pixels[i] = (led['r'], led['g'], led['b'])
+
+# Update the LEDs
+pixels.show()
+
+# Keep the script running to maintain the LED state
+# The Node.js process will kill this when needed
+time.sleep(600)  # 10 minutes timeout as a safety measure
+`;
+      
+      fs.writeFileSync(pythonScript, pythonCode);
+      fs.chmodSync(pythonScript, '755');  // Make executable
+    }
+    
+    // Run the Python script
+    ws2812Process = spawn('python3', [pythonScript, tempFile]);
+    
+    ws2812Process.stdout.on('data', (data) => {
+      console.log(`WS2812 Python: ${data}`);
+    });
+    
+    ws2812Process.stderr.on('data', (data) => {
+      console.error(`WS2812 Python error: ${data}`);
+    });
+    
+    ws2812Process.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        console.error(`WS2812 Python process exited with code ${code}`);
+      }
+      ws2812Process = null;
+    });
+  } catch (error) {
+    console.error('Error sending data to WS2812 LEDs:', error);
+  }
+}
+
 // Set all LEDs to a single color
 function setColor(r, g, b) {
   // Ensure values are within valid range
@@ -113,18 +213,9 @@ function setColor(r, g, b) {
     virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
   }
   
-  if (!config.simulation && ws281x) {
-    // Convert RGB to the format needed by the WS2812 library
-    const colorValue = rgbToHex(scaledR, scaledG, scaledB);
-    
-    // Set all pixels to the same color
-    for (let i = 0; i < config.ledCount; i++) {
-      pixelData[i] = colorValue;
-    }
-    
-    // Send the data to the LED strip
-    ws281x.render(pixelData);
-    
+  if (!config.simulation) {
+    // Send the data to the LED strip using our Python helper
+    sendToHardware(virtualLEDs);
     console.log(`Hardware: Setting all LEDs to RGB(${scaledR},${scaledG},${scaledB})`);
   }
   
@@ -136,12 +227,6 @@ function setColor(r, g, b) {
 function setBrightness(brightness) {
   // Ensure brightness is between 0-100
   currentBrightness = Math.max(0, Math.min(100, brightness));
-  
-  if (!config.simulation && ws281x) {
-    // Convert 0-100 scale to 0-255 scale for the hardware
-    const hwBrightness = Math.floor(currentBrightness * 2.55);
-    ws281x.setBrightness(hwBrightness);
-  }
   
   // Re-apply current color with new brightness
   setColor(currentColor.r, currentColor.g, currentColor.b);
@@ -182,15 +267,10 @@ function setPattern(pattern) {
           const scaledB = Math.floor(b * brightnessScale);
           
           virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
-          
-          // Update hardware if not in simulation mode
-          if (!config.simulation && ws281x) {
-            pixelData[i] = rgbToHex(scaledR, scaledG, scaledB);
-          }
         }
         
-        if (!config.simulation && ws281x) {
-          ws281x.render(pixelData);
+        if (!config.simulation) {
+          sendToHardware(virtualLEDs);
           console.log('Hardware: Updating rainbow pattern');
         }
         
@@ -226,12 +306,8 @@ function setPattern(pattern) {
           virtualLEDs[i] = { r, g, b };
         }
         
-        if (!config.simulation && ws281x) {
-          const colorValue = rgbToHex(r, g, b);
-          for (let i = 0; i < config.ledCount; i++) {
-            pixelData[i] = colorValue;
-          }
-          ws281x.render(pixelData);
+        if (!config.simulation) {
+          sendToHardware(virtualLEDs);
           console.log(`Hardware: Pulsing at ${Math.round(factor * 100)}%`);
         }
       }, 30);
@@ -243,10 +319,6 @@ function setPattern(pattern) {
         // Turn off all LEDs
         for (let i = 0; i < config.ledCount; i++) {
           virtualLEDs[i] = { r: 0, g: 0, b: 0 };
-          
-          if (!config.simulation && ws281x) {
-            pixelData[i] = 0; // Off
-          }
         }
         
         // Turn on just the current position
@@ -257,9 +329,8 @@ function setPattern(pattern) {
         
         virtualLEDs[position] = { r, g, b };
         
-        if (!config.simulation && ws281x) {
-          pixelData[position] = rgbToHex(r, g, b);
-          ws281x.render(pixelData);
+        if (!config.simulation) {
+          sendToHardware(virtualLEDs);
           console.log(`Hardware: Chase at position ${position}`);
         }
         
@@ -275,24 +346,16 @@ function setPattern(pattern) {
         const g = Math.floor(currentColor.g * brightnessScale);
         const b = Math.floor(currentColor.b * brightnessScale);
         
-        const colorValue = rgbToHex(r, g, b);
-        
         for (let i = 0; i < config.ledCount; i++) {
           if ((i % 2 === 0 && state) || (i % 2 !== 0 && !state)) {
             virtualLEDs[i] = { r, g, b };
-            if (!config.simulation && ws281x) {
-              pixelData[i] = colorValue;
-            }
           } else {
             virtualLEDs[i] = { r: 0, g: 0, b: 0 };
-            if (!config.simulation && ws281x) {
-              pixelData[i] = 0; // Off
-            }
           }
         }
         
-        if (!config.simulation && ws281x) {
-          ws281x.render(pixelData);
+        if (!config.simulation) {
+          sendToHardware(virtualLEDs);
           console.log(`Hardware: Alternating pattern state: ${state}`);
         }
         
@@ -368,15 +431,15 @@ function cleanup() {
     virtualLEDs[i] = { r: 0, g: 0, b: 0 };
   }
   
-  if (!config.simulation && ws281x) {
+  if (!config.simulation) {
     // Turn off all hardware LEDs
-    for (let i = 0; i < config.ledCount; i++) {
-      pixelData[i] = 0;
-    }
-    ws281x.render(pixelData);
+    sendToHardware(virtualLEDs);
     
-    // Reset the LED strip
-    ws281x.reset();
+    // Kill the Python process
+    if (ws2812Process) {
+      ws2812Process.kill();
+      ws2812Process = null;
+    }
     
     console.log('Hardware: Turning off all LEDs and resetting');
   }
