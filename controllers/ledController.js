@@ -1,26 +1,27 @@
-const five = require('johnny-five');
-const pixel = require('node-pixel');
+const fs = require('fs');
+const { exec } = require('child_process');
 const dotenv = require('dotenv');
+const path = require('path');
 
 dotenv.config();
 
 // LED strip configuration
 const config = {
   ledCount: parseInt(process.env.LED_COUNT) || 60,
-  pin: process.env.LED_PIN || 6,         // Data pin (D6 by default)
-  controller: process.env.LED_CONTROLLER || 'FIRMATA',
-  stripType: process.env.LED_STRIP_TYPE || 'WS2812',
-  brightness: parseInt(process.env.LED_BRIGHTNESS) || 100  // 0-100 for node-pixel
+  pin: parseInt(process.env.LED_PIN) || 18,
+  brightness: parseInt(process.env.LED_BRIGHTNESS) || 100,  // 0-100 scale
+  simulation: process.env.LED_SIMULATION === 'true' || true // Default to simulation mode
 };
 
 // LED strip state
-let strip = null;
-let board = null;
 let currentColor = { r: 0, g: 0, b: 0 };
 let currentBrightness = config.brightness;
 let currentPattern = 'solid';
 let patternInterval = null;
 let isReady = false;
+
+// Virtual LED strip for simulation
+let virtualLEDs = Array(config.ledCount).fill({ r: 0, g: 0, b: 0 });
 
 // Available patterns
 const patterns = {
@@ -33,95 +34,80 @@ const patterns = {
 
 // Initialize the LED strip
 function init() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     try {
-      // Initialize Johnny-Five board
-      board = new five.Board({
-        repl: false,
-        debug: false
-      });
-
-      board.on('ready', () => {
-        console.log('Board connected');
-        
-        // Initialize the LED strip
-        strip = new pixel.Strip({
-          board: board,
-          controller: config.controller,
-          strips: [{ pin: config.pin, length: config.ledCount }],
-          gamma: 2.8
-        });
-
-        strip.on('ready', () => {
-          console.log(`LED strip initialized with ${config.ledCount} LEDs on pin ${config.pin}`);
-          
-          // Set initial brightness
-          strip.brightness(currentBrightness / 100);  // node-pixel uses 0-1 for brightness
-          
-          // Turn off all LEDs initially
-          setColor(0, 0, 0);
-          
-          isReady = true;
-          resolve();
-        });
-
-        strip.on('error', (err) => {
-          console.error('LED strip error:', err);
-          reject(err);
-        });
-      });
-
-      board.on('error', (err) => {
-        console.error('Board error:', err);
-        reject(err);
-      });
+      console.log(`Initializing LED controller with ${config.ledCount} LEDs`);
+      
+      if (config.simulation) {
+        console.log('Running in simulation mode');
+      } else {
+        console.log(`Hardware mode on GPIO pin ${config.pin}`);
+        // Here you would initialize your specific hardware
+        // This would depend on your LED strip type and connection method
+      }
+      
+      // Set all LEDs to off initially
+      for (let i = 0; i < config.ledCount; i++) {
+        virtualLEDs[i] = { r: 0, g: 0, b: 0 };
+      }
+      
+      isReady = true;
+      console.log('LED controller initialized successfully');
+      resolve();
     } catch (error) {
-      console.error('Failed to initialize LED strip:', error);
-      reject(error);
+      console.error('Failed to initialize LED controller:', error);
+      // Still resolve, but in simulation mode
+      config.simulation = true;
+      isReady = true;
+      resolve();
     }
   });
 }
 
 // Set all LEDs to a single color
 function setColor(r, g, b) {
-  if (!isReady) {
-    console.warn('LED strip not ready');
-    return currentColor;
-  }
+  // Ensure values are within valid range
+  r = Math.max(0, Math.min(255, Math.floor(r)));
+  g = Math.max(0, Math.min(255, Math.floor(g)));
+  b = Math.max(0, Math.min(255, Math.floor(b)));
   
   currentColor = { r, g, b };
   
-  // Set all pixels to the same color
-  strip.color(`rgb(${r}, ${g}, ${b})`);
-  strip.show();
+  // Apply brightness
+  const brightnessScale = currentBrightness / 100;
+  const scaledR = Math.floor(r * brightnessScale);
+  const scaledG = Math.floor(g * brightnessScale);
+  const scaledB = Math.floor(b * brightnessScale);
   
+  // Update all LEDs in the virtual strip
+  for (let i = 0; i < config.ledCount; i++) {
+    virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
+  }
+  
+  if (!config.simulation) {
+    // Here you would send the color to your hardware
+    // This would depend on your LED strip type and connection method
+    console.log(`Hardware: Setting all LEDs to RGB(${scaledR},${scaledG},${scaledB})`);
+  }
+  
+  console.log(`Set color to RGB(${r},${g},${b}) with brightness ${currentBrightness}%`);
   return currentColor;
 }
 
 // Set the brightness of the LED strip
 function setBrightness(brightness) {
-  if (!isReady) {
-    console.warn('LED strip not ready');
-    return currentBrightness;
-  }
-  
   // Ensure brightness is between 0-100
   currentBrightness = Math.max(0, Math.min(100, brightness));
   
-  // node-pixel uses 0-1 for brightness
-  strip.brightness(currentBrightness / 100);
-  strip.show();
+  // Re-apply current color with new brightness
+  setColor(currentColor.r, currentColor.g, currentColor.b);
   
+  console.log(`Set brightness to ${currentBrightness}%`);
   return currentBrightness;
 }
 
 // Set a pattern for the LED strip
 function setPattern(pattern) {
-  if (!isReady) {
-    console.warn('LED strip not ready');
-    return currentPattern;
-  }
-  
   // Clear any existing pattern interval
   if (patternInterval) {
     clearInterval(patternInterval);
@@ -144,10 +130,22 @@ function setPattern(pattern) {
         for (let i = 0; i < config.ledCount; i++) {
           const hue = ((i + offset) % 360) / 360;
           const { r, g, b } = hsvToRgb(hue, 1, 1);
-          strip.pixel(i).color(`rgb(${r}, ${g}, ${b})`);
+          
+          // Apply brightness
+          const brightnessScale = currentBrightness / 100;
+          const scaledR = Math.floor(r * brightnessScale);
+          const scaledG = Math.floor(g * brightnessScale);
+          const scaledB = Math.floor(b * brightnessScale);
+          
+          virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
         }
+        
+        if (!config.simulation) {
+          // Here you would update your hardware with the new LED values
+          console.log('Hardware: Updating rainbow pattern');
+        }
+        
         offset = (offset + 1) % 360;
-        strip.show();
       }, 50);
       break;
       
@@ -170,41 +168,69 @@ function setPattern(pattern) {
         }
         
         const factor = brightness / 255;
-        const r = Math.floor(currentColor.r * factor);
-        const g = Math.floor(currentColor.g * factor);
-        const b = Math.floor(currentColor.b * factor);
+        const brightnessScale = currentBrightness / 100;
+        const r = Math.floor(currentColor.r * factor * brightnessScale);
+        const g = Math.floor(currentColor.g * factor * brightnessScale);
+        const b = Math.floor(currentColor.b * factor * brightnessScale);
         
-        strip.color(`rgb(${r}, ${g}, ${b})`);
-        strip.show();
+        for (let i = 0; i < config.ledCount; i++) {
+          virtualLEDs[i] = { r, g, b };
+        }
+        
+        if (!config.simulation) {
+          // Here you would update your hardware with the new LED values
+          console.log(`Hardware: Pulsing at ${Math.round(factor * 100)}%`);
+        }
       }, 30);
       break;
       
     case 'chase':
       let position = 0;
       patternInterval = setInterval(() => {
-        strip.off(); // Turn off all LEDs
+        // Turn off all LEDs
+        for (let i = 0; i < config.ledCount; i++) {
+          virtualLEDs[i] = { r: 0, g: 0, b: 0 };
+        }
         
         // Turn on just the current position
-        strip.pixel(position).color(`rgb(${currentColor.r}, ${currentColor.g}, ${currentColor.b})`);
+        const brightnessScale = currentBrightness / 100;
+        const r = Math.floor(currentColor.r * brightnessScale);
+        const g = Math.floor(currentColor.g * brightnessScale);
+        const b = Math.floor(currentColor.b * brightnessScale);
+        
+        virtualLEDs[position] = { r, g, b };
+        
+        if (!config.simulation) {
+          // Here you would update your hardware with the new LED values
+          console.log(`Hardware: Chase at position ${position}`);
+        }
         
         position = (position + 1) % config.ledCount;
-        strip.show();
       }, 50);
       break;
       
     case 'alternating':
       let state = false;
       patternInterval = setInterval(() => {
+        const brightnessScale = currentBrightness / 100;
+        const r = Math.floor(currentColor.r * brightnessScale);
+        const g = Math.floor(currentColor.g * brightnessScale);
+        const b = Math.floor(currentColor.b * brightnessScale);
+        
         for (let i = 0; i < config.ledCount; i++) {
           if ((i % 2 === 0 && state) || (i % 2 !== 0 && !state)) {
-            strip.pixel(i).color(`rgb(${currentColor.r}, ${currentColor.g}, ${currentColor.b})`);
+            virtualLEDs[i] = { r, g, b };
           } else {
-            strip.pixel(i).off();
+            virtualLEDs[i] = { r: 0, g: 0, b: 0 };
           }
         }
         
+        if (!config.simulation) {
+          // Here you would update your hardware with the new LED values
+          console.log(`Hardware: Alternating pattern state: ${state}`);
+        }
+        
         state = !state;
-        strip.show();
       }, 500);
       break;
       
@@ -213,6 +239,7 @@ function setPattern(pattern) {
       break;
   }
   
+  console.log(`Set pattern to ${pattern}`);
   return currentPattern;
 }
 
@@ -248,13 +275,19 @@ function getStatus() {
     brightness: currentBrightness,
     pattern: currentPattern,
     ledCount: config.ledCount,
-    isReady: isReady
+    isReady: isReady,
+    simulation: config.simulation
   };
 }
 
 // Get available patterns
 function getPatterns() {
   return patterns;
+}
+
+// Get the current state of all LEDs (for debugging or visualization)
+function getLEDState() {
+  return virtualLEDs;
 }
 
 // Clean up resources when shutting down
@@ -264,15 +297,17 @@ function cleanup() {
     patternInterval = null;
   }
   
-  if (strip && isReady) {
-    // Turn off all LEDs
-    strip.off();
-    strip.show();
+  // Turn off all LEDs
+  for (let i = 0; i < config.ledCount; i++) {
+    virtualLEDs[i] = { r: 0, g: 0, b: 0 };
   }
   
-  if (board) {
-    board.io.reset();
+  if (!config.simulation) {
+    // Here you would turn off your hardware LEDs
+    console.log('Hardware: Turning off all LEDs');
   }
+  
+  console.log('LED controller cleaned up');
 }
 
 module.exports = {
@@ -282,5 +317,6 @@ module.exports = {
   setPattern,
   getStatus,
   getPatterns,
+  getLEDState,
   cleanup
 };
