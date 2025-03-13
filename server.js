@@ -24,8 +24,21 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Initialize hardware controllers
-ledController.init();
-cameraController.init();
+async function initializeControllers() {
+  try {
+    await Promise.all([
+      ledController.init(),
+      cameraController.init()
+    ]);
+    console.log('All controllers initialized successfully');
+  } catch (error) {
+    console.error('Error initializing controllers:', error);
+    // Continue running even if initialization fails
+  }
+}
+
+// Start initialization
+initializeControllers();
 
 // Socket.io connection
 io.on('connection', (socket) => {
@@ -141,12 +154,36 @@ server.listen(PORT, () => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-function shutdown() {
+async function shutdown() {
   console.log('Shutting down gracefully...');
-  ledController.cleanup();
-  cameraController.cleanup();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
+  
+  // Set a timeout to force exit if cleanup takes too long
+  const forceExitTimeout = setTimeout(() => {
+    console.log('Forced shutdown after timeout');
+    process.exit(1);
+  }, 5000);
+  
+  try {
+    // Run cleanup functions in parallel
+    await Promise.all([
+      ledController.cleanup(),
+      cameraController.cleanup()
+    ]);
+    
+    // Close the server
+    server.close(() => {
+      clearTimeout(forceExitTimeout);
+      console.log('Server closed');
+      
+      // Force exit after a short delay to ensure all resources are released
+      setTimeout(() => {
+        console.log('Clean exit');
+        process.exit(0);
+      }, 500);
+    });
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    clearTimeout(forceExitTimeout);
+    process.exit(1);
+  }
 }
