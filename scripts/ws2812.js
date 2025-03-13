@@ -69,52 +69,61 @@ void handle_signal(int sig) {
     running = 0;
 }
 
+// Render LED data using DMA-based PWM
 void ws2812_render(int pin, uint8_t *pixels, int count) {
-    // Convert RGB data to PWM signal
-    int numbits = count * 3 * 8;
-    int numBytes = numbits / 8;
-    if (numbits % 8) numBytes++;
+    // Calculate the number of bytes needed for the waveform
+    int numBits = count * 3 * 8;
     
-    // Each bit requires a specific pulse
-    unsigned pulse_width[numBytes * 8];
-    int pulse_count = 0;
+    // Allocate memory for the waveform
+    gpioPulse_t *pulses = (gpioPulse_t *)malloc(numBits * 2 * sizeof(gpioPulse_t));
+    if (!pulses) {
+        fprintf(stderr, "Memory allocation failed for pulses\\n");
+        return;
+    }
     
-    // Convert each byte to pulses
+    int pulseCount = 0;
+    
+    // Set GPIO mode
+    gpioSetMode(pin, PI_OUTPUT);
+    
+    // Create pulses for each bit
     for (int i = 0; i < count * 3; i++) {
         uint8_t byte = pixels[i];
         
-        // Process each bit in the byte
+        // Process each bit in the byte (MSB first)
         for (int bit = 7; bit >= 0; bit--) {
             if (byte & (1 << bit)) {
                 // 1 bit: longer high pulse, shorter low pulse
-                pulse_width[pulse_count++] = (int)(T1H * 1000000); // Convert to ns
+                pulses[pulseCount].gpioOn = (1 << pin);
+                pulses[pulseCount].gpioOff = 0;
+                pulses[pulseCount].usDelay = T1H;
+                pulseCount++;
+                
+                pulses[pulseCount].gpioOn = 0;
+                pulses[pulseCount].gpioOff = (1 << pin);
+                pulses[pulseCount].usDelay = T1L;
+                pulseCount++;
             } else {
                 // 0 bit: shorter high pulse, longer low pulse
-                pulse_width[pulse_count++] = (int)(T0H * 1000000); // Convert to ns
+                pulses[pulseCount].gpioOn = (1 << pin);
+                pulses[pulseCount].gpioOff = 0;
+                pulses[pulseCount].usDelay = T0H;
+                pulseCount++;
+                
+                pulses[pulseCount].gpioOn = 0;
+                pulses[pulseCount].gpioOff = (1 << pin);
+                pulses[pulseCount].usDelay = T0L;
+                pulseCount++;
             }
         }
     }
     
-    // Send the data using wave functions
-    gpioSetMode(pin, PI_OUTPUT);
-    
-    // Create a waveform
+    // Clear any existing waveforms
     gpioWaveAddNew();
     
-    // Add pulses to the waveform
-    for (int i = 0; i < pulse_count; i++) {
-        gpioPulse_t pulses[2];
-        pulses[0].gpioOn = (1<<pin);
-        pulses[0].gpioOff = 0;
-        pulses[0].usDelay = pulse_width[i] / 1000; // Convert ns to μs
-        
-        pulses[1].gpioOn = 0;
-        pulses[1].gpioOff = (1<<pin);
-        pulses[1].usDelay = ((i & 1) ? T1L : T0L) * 1000000 / 1000; // Convert to μs
-        
-        gpioWaveAddNew(); // Clear any existing waveform
-        gpioWaveAddGeneric(2, pulses);
-    }
+    // Add the pulses to the waveform
+    gpioWaveAddGeneric(pulseCount, pulses);
+    free(pulses);
     
     // Create and send the waveform
     int wave_id = gpioWaveCreate();
