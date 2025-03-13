@@ -32,6 +32,23 @@ const testPatterns = [
   // Alternating red and blue
   Array(60).fill().map((_, i) => i % 2 === 0 ? { r: 255, g: 0, b: 0 } : { r: 0, g: 0, b: 255 }),
   
+  // Chase pattern (single moving pixel)
+  ...Array(60).fill().map((_, position) => {
+    const leds = Array(60).fill({ r: 0, g: 0, b: 0 });
+    leds[position] = { r: 255, g: 255, b: 255 };
+    return leds;
+  }),
+  
+  // Brightness test (white at increasing brightness)
+  ...Array(10).fill().map((_, i) => {
+    const brightness = (i + 1) / 10;
+    return Array(60).fill({ 
+      r: Math.floor(255 * brightness), 
+      g: Math.floor(255 * brightness), 
+      b: Math.floor(255 * brightness) 
+    });
+  }),
+  
   // All off
   Array(60).fill({ r: 0, g: 0, b: 0 })
 ];
@@ -74,9 +91,24 @@ const interval = setInterval(() => {
     return;
   }
   
-  console.log(`Showing pattern ${patternIndex + 1}/${testPatterns.length}`);
-  driver.update(testPatterns[patternIndex]);
+  const pattern = testPatterns[patternIndex];
+  const patternType = patternIndex < 5 ? 'Basic' : 
+                      patternIndex < 65 ? 'Chase' : 
+                      patternIndex < 75 ? 'Brightness' : 'Off';
+  
+  console.log(`Showing pattern ${patternIndex + 1}/${testPatterns.length} (${patternType})`);
+  driver.update(pattern);
   patternIndex++;
+  
+  // Speed up for chase patterns
+  if (patternIndex >= 5 && patternIndex < 65) {
+    clearInterval(interval);
+    interval = setInterval(arguments.callee, 100);
+  } else if (patternIndex === 65) {
+    // Slow down for brightness test
+    clearInterval(interval);
+    interval = setInterval(arguments.callee, 500);
+  }
 }, 2000);
 
 // Handle Ctrl+C

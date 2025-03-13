@@ -226,14 +226,22 @@ int main(int argc, char *argv[]) {
       // Write LED count (32-bit integer)
       buffer.writeUInt32LE(ledData.length, 0);
       
+      // Apply brightness and write RGB values for each LED
+      const brightnessScale = this.brightness / 100;
+      
       // Write RGB values for each LED
       for (let i = 0; i < ledData.length; i++) {
         const led = ledData[i];
         const offset = 4 + (i * 3);
         
-        buffer[offset] = led.g; // GRB order for WS2812
-        buffer[offset + 1] = led.r;
-        buffer[offset + 2] = led.b;
+        // Apply brightness scaling
+        const r = Math.floor(led.r * brightnessScale);
+        const g = Math.floor(led.g * brightnessScale);
+        const b = Math.floor(led.b * brightnessScale);
+        
+        buffer[offset] = g; // GRB order for WS2812
+        buffer[offset + 1] = r;
+        buffer[offset + 2] = b;
       }
       
       fs.writeFileSync(dataFile, buffer);

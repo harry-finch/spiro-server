@@ -60,13 +60,8 @@ function init() {
           } else {
             console.log('pigpio detected:', stdout.trim());
             
-            // Initialize our custom WS2812 driver
-            ws2812Driver = new WS2812Driver({
-              ledCount: config.ledCount,
-              pin: config.pin,
-              brightness: config.brightness,
-              simulation: config.simulation
-            });
+            // We'll initialize the driver on first use to avoid startup delays
+            console.log('WS2812 driver will be initialized on first use');
           }
         });
         
@@ -104,11 +99,17 @@ function sendToHardware(ledData) {
   if (config.simulation) return;
   
   try {
-    if (ws2812Driver) {
-      ws2812Driver.update(ledData);
-    } else {
-      console.warn('WS2812 driver not initialized');
+    if (!ws2812Driver) {
+      // Initialize driver if not already done
+      ws2812Driver = new WS2812Driver({
+        ledCount: config.ledCount,
+        pin: config.pin,
+        brightness: currentBrightness,
+        simulation: config.simulation
+      });
     }
+    
+    ws2812Driver.update(ledData);
   } catch (error) {
     console.error('Error sending data to WS2812 LEDs:', error);
   }
@@ -148,6 +149,11 @@ function setColor(r, g, b) {
 function setBrightness(brightness) {
   // Ensure brightness is between 0-100
   currentBrightness = Math.max(0, Math.min(100, brightness));
+  
+  // Update driver brightness if it exists
+  if (ws2812Driver && !config.simulation) {
+    ws2812Driver.brightness = currentBrightness;
+  }
   
   // Re-apply current color with new brightness
   setColor(currentColor.r, currentColor.g, currentColor.b);
