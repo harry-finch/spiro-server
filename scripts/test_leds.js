@@ -19,6 +19,9 @@ console.log(`Using ${ledCount} LEDs`);
 
 // Create some test patterns
 const testPatterns = [
+  // All white
+  Array(ledCount).fill({ r: 255, g: 255, b: 255 }),
+
   // All red
   Array(ledCount).fill({ r: 255, g: 0, b: 0 }),
 
@@ -27,40 +30,6 @@ const testPatterns = [
 
   // All blue
   Array(ledCount).fill({ r: 0, g: 0, b: 255 }),
-
-  // Rainbow pattern
-  Array(ledCount)
-    .fill()
-    .map((_, i) => {
-      const hue = (i / ledCount) * 360;
-      return hsvToRgb(hue, 1, 1);
-    }),
-
-  // Alternating red and blue
-  Array(ledCount)
-    .fill()
-    .map((_, i) => (i % 2 === 0 ? { r: 255, g: 0, b: 0 } : { r: 0, g: 0, b: 255 })),
-
-  // Chase pattern (single moving pixel)
-  ...Array(Math.min(ledCount, 30)) // Limit chase patterns to avoid too many
-    .fill()
-    .map((_, position) => {
-      const leds = Array(ledCount).fill({ r: 0, g: 0, b: 0 });
-      leds[position % ledCount] = { r: 255, g: 255, b: 255 };
-      return leds;
-    }),
-
-  // Brightness test (white at increasing brightness)
-  ...Array(10)
-    .fill()
-    .map((_, i) => {
-      const brightness = (i + 1) / 10;
-      return Array(ledCount).fill({
-        r: Math.floor(255 * brightness),
-        g: Math.floor(255 * brightness),
-        b: Math.floor(255 * brightness),
-      });
-    }),
 
   // All off
   Array(ledCount).fill({ r: 0, g: 0, b: 0 }),
