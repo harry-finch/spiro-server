@@ -348,30 +348,51 @@ function getLEDState() {
 
 // Clean up resources when shutting down
 function cleanup() {
-  if (patternInterval) {
-    clearInterval(patternInterval);
-    patternInterval = null;
-  }
-  
-  // Turn off all LEDs
-  for (let i = 0; i < config.ledCount; i++) {
-    virtualLEDs[i] = { r: 0, g: 0, b: 0 };
-  }
-  
-  if (!config.simulation) {
-    // Turn off all hardware LEDs
-    sendToHardware(virtualLEDs);
+  return new Promise((resolve) => {
+    console.log('LED controller cleanup started...');
     
-    // Stop the LED driver
-    if (ws2812Driver) {
-      ws2812Driver.stop();
-      ws2812Driver = null;
+    if (patternInterval) {
+      clearInterval(patternInterval);
+      patternInterval = null;
     }
     
-    console.log('Hardware: Turning off all LEDs and resetting');
-  }
-  
-  console.log('LED controller cleaned up');
+    // Turn off all LEDs
+    for (let i = 0; i < config.ledCount; i++) {
+      virtualLEDs[i] = { r: 0, g: 0, b: 0 };
+    }
+    
+    if (!config.simulation && ws2812Driver) {
+      try {
+        // Turn off all hardware LEDs
+        sendToHardware(virtualLEDs);
+        
+        // Stop the LED driver with a timeout
+        const stopTimeout = setTimeout(() => {
+          console.log('LED driver stop timed out, forcing cleanup');
+          ws2812Driver = null;
+          resolve();
+        }, 1000);
+        
+        // Try to stop the driver gracefully
+        ws2812Driver.stop();
+        
+        // Kill any lingering processes
+        exec('pkill -f ws2812_driver', () => {
+          clearTimeout(stopTimeout);
+          ws2812Driver = null;
+          console.log('Hardware: Turned off all LEDs and reset driver');
+          resolve();
+        });
+      } catch (error) {
+        console.error('Error during LED cleanup:', error);
+        ws2812Driver = null;
+        resolve();
+      }
+    } else {
+      console.log('LED controller cleaned up (simulation mode or no driver)');
+      resolve();
+    }
+  });
 }
 
 module.exports = {

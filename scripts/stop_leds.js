@@ -21,6 +21,8 @@ driver.update(offLEDs);
 
 // Wait a moment to ensure the update is sent
 setTimeout(() => {
+  console.log('Stopping driver...');
+  
   // Stop the driver
   driver.stop();
   
@@ -32,16 +34,26 @@ setTimeout(() => {
       console.log('All ws2812_driver processes terminated');
     }
     
-    // Try to stop pigpiod
-    exec('sudo killall pigpiod', (error) => {
-      if (error && error.code !== 1) {
-        console.log('Note: pigpiod was not running or could not be stopped');
-      } else {
-        console.log('pigpiod stopped');
-      }
-      
-      console.log('LED cleanup complete');
-      process.exit(0);
+    // Force kill any remaining processes that might be using the GPIO
+    exec('sudo killall -9 ws2812_driver 2>/dev/null || true', () => {
+      // Try to stop pigpiod
+      exec('sudo killall pigpiod', (error) => {
+        if (error && error.code !== 1) {
+          console.log('Note: pigpiod was not running or could not be stopped');
+        } else {
+          console.log('pigpiod stopped');
+        }
+        
+        // Remove any lock files
+        exec('sudo rm -f /var/run/pigpio.pid /dev/shm/pigpio /var/run/pigpio.sock 2>/dev/null || true', () => {
+          console.log('LED cleanup complete');
+          
+          // Force exit after a short delay to ensure all processes have time to terminate
+          setTimeout(() => {
+            process.exit(0);
+          }, 500);
+        });
+      });
     });
   });
 }, 1000);

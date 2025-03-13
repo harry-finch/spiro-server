@@ -4,44 +4,49 @@ const path = require("path");
 // Test the WS2812 driver
 console.log("Testing WS2812 LED driver...");
 
+// Get LED count from command line or use default
+const ledCount = parseInt(process.argv[2]) || 10;
+
 // Create a driver instance
 const driver = new WS2812Driver({
-  ledCount: 10,
+  ledCount: ledCount,
   pin: 18,
   brightness: 100,
   simulation: false,
 });
 
+console.log(`Using ${ledCount} LEDs`);
+
 // Create some test patterns
 const testPatterns = [
   // All red
-  Array(60).fill({ r: 255, g: 0, b: 0 }),
+  Array(ledCount).fill({ r: 255, g: 0, b: 0 }),
 
   // All green
-  Array(60).fill({ r: 0, g: 255, b: 0 }),
+  Array(ledCount).fill({ r: 0, g: 255, b: 0 }),
 
   // All blue
-  Array(60).fill({ r: 0, g: 0, b: 255 }),
+  Array(ledCount).fill({ r: 0, g: 0, b: 255 }),
 
   // Rainbow pattern
-  Array(60)
+  Array(ledCount)
     .fill()
     .map((_, i) => {
-      const hue = (i / 60) * 360;
+      const hue = (i / ledCount) * 360;
       return hsvToRgb(hue, 1, 1);
     }),
 
   // Alternating red and blue
-  Array(60)
+  Array(ledCount)
     .fill()
     .map((_, i) => (i % 2 === 0 ? { r: 255, g: 0, b: 0 } : { r: 0, g: 0, b: 255 })),
 
   // Chase pattern (single moving pixel)
-  ...Array(60)
+  ...Array(Math.min(ledCount, 30)) // Limit chase patterns to avoid too many
     .fill()
     .map((_, position) => {
-      const leds = Array(60).fill({ r: 0, g: 0, b: 0 });
-      leds[position] = { r: 255, g: 255, b: 255 };
+      const leds = Array(ledCount).fill({ r: 0, g: 0, b: 0 });
+      leds[position % ledCount] = { r: 255, g: 255, b: 255 };
       return leds;
     }),
 
@@ -50,7 +55,7 @@ const testPatterns = [
     .fill()
     .map((_, i) => {
       const brightness = (i + 1) / 10;
-      return Array(60).fill({
+      return Array(ledCount).fill({
         r: Math.floor(255 * brightness),
         g: Math.floor(255 * brightness),
         b: Math.floor(255 * brightness),
@@ -58,7 +63,7 @@ const testPatterns = [
     }),
 
   // All off
-  Array(60).fill({ r: 0, g: 0, b: 0 }),
+  Array(ledCount).fill({ r: 0, g: 0, b: 0 }),
 ];
 
 // Function to convert HSV to RGB

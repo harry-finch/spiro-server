@@ -153,10 +153,18 @@ int main(int argc, char *argv[]) {
     int pin = atoi(argv[1]);
     char *dataFile = argv[2];
     
-    // Initialize pigpio
+    // Initialize pigpio with a different port if needed
     if (gpioInitialise() < 0) {
-        fprintf(stderr, "Failed to initialize pigpio\\n");
-        return 1;
+        // Try with a different port
+        gpioCfgSocketPort(8889);
+        if (gpioInitialise() < 0) {
+            // Try one more port
+            gpioCfgSocketPort(8890);
+            if (gpioInitialise() < 0) {
+                fprintf(stderr, "Failed to initialize pigpio after trying multiple ports\\n");
+                return 1;
+            }
+        }
     }
     
     // Set up signal handling
