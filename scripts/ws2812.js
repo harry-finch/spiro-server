@@ -32,7 +32,7 @@ class WS2812Driver {
         fs.writeFileSync(sourcePath, this.getDriverSource());
         
         // Compile with gcc
-        execSync(`gcc -o ${this.executablePath} ${sourcePath} -lrt -lm -lpigpio -pthread`, 
+        execSync(`gcc -Wall -o ${this.executablePath} ${sourcePath} -lrt -lm -lpigpio -pthread`, 
           { stdio: 'inherit' });
         
         // Make executable
@@ -57,11 +57,11 @@ class WS2812Driver {
 #include <signal.h>
 
 // WS2812B timing (in microseconds)
-#define T0H 0.4  // 0 bit high time
-#define T1H 0.8  // 1 bit high time
-#define T0L 0.85 // 0 bit low time
-#define T1L 0.45 // 1 bit low time
-#define RES 50   // Reset time
+#define T0H 0.35  // 0 bit high time
+#define T1H 0.7   // 1 bit high time
+#define T0L 0.8   // 0 bit low time
+#define T1L 0.6   // 1 bit low time
+#define RES 50    // Reset time in microseconds
 
 volatile int running = 1;
 
@@ -103,8 +103,17 @@ void ws2812_render(int pin, uint8_t *pixels, int count) {
     
     // Add pulses to the waveform
     for (int i = 0; i < pulse_count; i++) {
-        gpioWaveAddGeneric(2, (gpioWaveGeneric_t[]){{PI_ON, pulse_width[i]}, 
-                                                    {PI_OFF, (i & 1) ? (int)(T1L * 1000000) : (int)(T0L * 1000000)}});
+        gpioPulse_t pulses[2];
+        pulses[0].gpioOn = (1<<pin);
+        pulses[0].gpioOff = 0;
+        pulses[0].usDelay = pulse_width[i] / 1000; // Convert ns to μs
+        
+        pulses[1].gpioOn = 0;
+        pulses[1].gpioOff = (1<<pin);
+        pulses[1].usDelay = ((i & 1) ? T1L : T0L) * 1000000 / 1000; // Convert to μs
+        
+        gpioWaveAddNew(); // Clear any existing waveform
+        gpioWaveAddGeneric(2, pulses);
     }
     
     // Create and send the waveform
