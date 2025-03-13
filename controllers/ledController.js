@@ -1,7 +1,8 @@
 const fs = require('fs');
-const { exec, spawn } = require('child_process');
+const { exec } = require('child_process');
 const dotenv = require('dotenv');
 const path = require('path');
+const WS2812Driver = require('../scripts/ws2812');
 
 dotenv.config();
 
@@ -33,7 +34,7 @@ const patterns = {
 };
 
 // Hardware-specific variables
-let ws2812Process = null;
+let ws2812Driver = null;
 
 // Initialize the LED strip
 function init() {
@@ -51,13 +52,21 @@ function init() {
           throw new Error('Hardware mode is only supported on Raspberry Pi (Linux)');
         }
         
-        // Check if the SPI interface is enabled
-        exec('ls /dev/spidev*', (error, stdout) => {
+        // Check if pigpio is installed
+        exec('which pigpiod', (error, stdout) => {
           if (error || !stdout.trim()) {
-            console.warn('SPI interface not detected. You may need to enable it using raspi-config');
+            console.warn('pigpio not detected. Install with: sudo apt-get install pigpio');
             config.simulation = true;
           } else {
-            console.log('SPI interface detected:', stdout.trim());
+            console.log('pigpio detected:', stdout.trim());
+            
+            // Initialize our custom WS2812 driver
+            ws2812Driver = new WS2812Driver({
+              ledCount: config.ledCount,
+              pin: config.pin,
+              brightness: config.brightness,
+              simulation: config.simulation
+            });
           }
         });
         
@@ -90,104 +99,16 @@ function rgbToHex(r, g, b) {
   return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
 }
 
-// Helper function to send data to the WS2812 LEDs using Python's rpi_ws281x library
+// Helper function to send data to the WS2812 LEDs using our custom driver
 function sendToHardware(ledData) {
   if (config.simulation) return;
   
   try {
-    // Kill any existing process
-    if (ws2812Process) {
-      ws2812Process.kill();
-      ws2812Process = null;
+    if (ws2812Driver) {
+      ws2812Driver.update(ledData);
+    } else {
+      console.warn('WS2812 driver not initialized');
     }
-    
-    // Create a temporary file with LED data
-    const tempFile = path.join(__dirname, '../temp_led_data.json');
-    fs.writeFileSync(tempFile, JSON.stringify({
-      leds: ledData,
-      count: config.ledCount,
-      pin: config.pin,
-      brightness: currentBrightness
-    }));
-    
-    // Run the Python script to control the LEDs
-    const pythonScript = path.join(__dirname, '../scripts/ws2812_control.py');
-    
-    // Create the script if it doesn't exist
-    if (!fs.existsSync(pythonScript)) {
-      const scriptDir = path.dirname(pythonScript);
-      if (!fs.existsSync(scriptDir)) {
-        fs.mkdirSync(scriptDir, { recursive: true });
-      }
-      
-      // Create a Python script that uses rpi_ws281x library
-      const pythonCode = `#!/usr/bin/env python3
-import json
-import sys
-import time
-try:
-    import board
-    import neopixel
-    HAS_LIBRARIES = True
-except ImportError:
-    HAS_LIBRARIES = False
-    print("Warning: Required libraries not found. Install with: pip3 install adafruit-circuitpython-neopixel")
-
-# Read LED data from the temporary file
-with open(sys.argv[1], 'r') as f:
-    data = json.load(f)
-
-led_count = data['count']
-pin = data['pin']
-brightness = data['brightness'] / 100.0  # Convert to 0-1 scale
-led_data = data['leds']
-
-if not HAS_LIBRARIES:
-    print("Simulation mode: Would set", led_count, "LEDs")
-    sys.exit(0)
-
-# Initialize the LED strip
-pixels = neopixel.NeoPixel(
-    board.D${config.pin},  # Use the specified pin
-    led_count,
-    brightness=brightness,
-    auto_write=False
-)
-
-# Set the LED colors
-for i, led in enumerate(led_data):
-    if i < led_count:
-        pixels[i] = (led['r'], led['g'], led['b'])
-
-# Update the LEDs
-pixels.show()
-
-# Keep the script running to maintain the LED state
-# The Node.js process will kill this when needed
-time.sleep(600)  # 10 minutes timeout as a safety measure
-`;
-      
-      fs.writeFileSync(pythonScript, pythonCode);
-      fs.chmodSync(pythonScript, '755');  // Make executable
-    }
-    
-    // Run the Python script
-    ws2812Process = spawn('python3', [pythonScript, tempFile]);
-    
-    ws2812Process.stdout.on('data', (data) => {
-      console.log(`WS2812 Python: ${data}`);
-    });
-    
-    ws2812Process.stderr.on('data', (data) => {
-      console.error(`WS2812 Python error: ${data}`);
-    });
-    
-    ws2812Process.on('close', (code) => {
-      if (code !== 0 && code !== null) {
-        console.error(`WS2812 Python process exited with code ${code}`);
-      }
-      ws2812Process = null;
-    });
   } catch (error) {
     console.error('Error sending data to WS2812 LEDs:', error);
   }
@@ -435,10 +356,10 @@ function cleanup() {
     // Turn off all hardware LEDs
     sendToHardware(virtualLEDs);
     
-    // Kill the Python process
-    if (ws2812Process) {
-      ws2812Process.kill();
-      ws2812Process = null;
+    // Stop the LED driver
+    if (ws2812Driver) {
+      ws2812Driver.stop();
+      ws2812Driver = null;
     }
     
     console.log('Hardware: Turning off all LEDs and resetting');
