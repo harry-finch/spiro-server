@@ -26,36 +26,44 @@ setTimeout(() => {
   // Stop the driver
   driver.stop();
   
-  // Kill any existing ws2812_driver processes
-  exec('pkill -f ws2812_driver', (error) => {
-    if (error && error.code !== 1) {
-      console.error('Error killing ws2812_driver processes:', error);
-    } else {
-      console.log('All ws2812_driver processes terminated');
+  // More aggressive cleanup with multiple approaches
+  const cleanupSteps = [
+    // Kill any existing ws2812_driver processes
+    'pkill -f ws2812_driver',
+    // Force kill with -9 if needed
+    'pkill -9 -f ws2812_driver 2>/dev/null || true',
+    // Use sudo killall as another approach
+    'sudo killall ws2812_driver 2>/dev/null || true',
+    'sudo killall -9 ws2812_driver 2>/dev/null || true',
+    // Try to stop pigpiod
+    'sudo killall pigpiod 2>/dev/null || true',
+    // Remove any lock files
+    'sudo rm -f /var/run/pigpio.pid /dev/shm/pigpio* /var/run/pigpio.sock 2>/dev/null || true'
+  ];
+  
+  // Execute cleanup steps in sequence
+  function runNextCleanupStep(index) {
+    if (index >= cleanupSteps.length) {
+      console.log('LED cleanup complete');
+      
+      // Force exit after a short delay to ensure all processes have time to terminate
+      setTimeout(() => {
+        process.exit(0);
+      }, 500);
+      return;
     }
     
-    // Force kill any remaining processes that might be using the GPIO
-    exec('sudo killall -9 ws2812_driver 2>/dev/null || true', () => {
-      // Try to stop pigpiod
-      exec('sudo killall pigpiod', (error) => {
-        if (error && error.code !== 1) {
-          console.log('Note: pigpiod was not running or could not be stopped');
-        } else {
-          console.log('pigpiod stopped');
-        }
-        
-        // Remove any lock files
-        exec('sudo rm -f /var/run/pigpio.pid /dev/shm/pigpio /var/run/pigpio.sock 2>/dev/null || true', () => {
-          console.log('LED cleanup complete');
-          
-          // Force exit after a short delay to ensure all processes have time to terminate
-          setTimeout(() => {
-            process.exit(0);
-          }, 500);
-        });
-      });
+    const cmd = cleanupSteps[index];
+    console.log(`Running cleanup step: ${cmd}`);
+    
+    exec(cmd, (error) => {
+      // Ignore errors and continue with next step
+      runNextCleanupStep(index + 1);
     });
-  });
+  }
+  
+  // Start the cleanup sequence
+  runNextCleanupStep(0);
 }, 1000);
 
 // Handle Ctrl+C

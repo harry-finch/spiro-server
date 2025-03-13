@@ -306,11 +306,52 @@ int main(int argc, char *argv[]) {
   stop() {
     if (this.process) {
       try {
-        process.kill(-this.process.pid, 'SIGTERM');
+        // First try to kill the process group
+        try {
+          process.kill(-this.process.pid, 'SIGTERM');
+        } catch (e) {
+          console.log('Process group kill failed, trying direct kill');
+        }
+        
+        // Also try direct kill as fallback
+        try {
+          this.process.kill('SIGTERM');
+        } catch (e) {
+          console.log('Direct process kill failed');
+        }
+        
+        // Force kill after a short delay if still running
+        setTimeout(() => {
+          try {
+            if (this.process) {
+              console.log('Forcing process termination');
+              this.process.kill('SIGKILL');
+            }
+          } catch (e) {
+            // Ignore errors, process might be gone already
+          }
+        }, 500);
+        
+        // Use pkill as a last resort
+        const { execSync } = require('child_process');
+        try {
+          execSync('pkill -f ws2812_driver', { stdio: 'ignore' });
+        } catch (e) {
+          // Ignore errors from pkill, it returns non-zero if no processes match
+        }
       } catch (error) {
         console.error('Error stopping WS2812 driver:', error);
+      } finally {
+        this.process = null;
       }
-      this.process = null;
+    } else {
+      // Even if we don't have a process reference, try to kill any lingering processes
+      try {
+        const { execSync } = require('child_process');
+        execSync('pkill -f ws2812_driver', { stdio: 'ignore' });
+      } catch (e) {
+        // Ignore errors from pkill
+      }
     }
   }
 }
