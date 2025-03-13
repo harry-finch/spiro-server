@@ -64,6 +64,7 @@ class WS2812Driver {
 #define RES 50    // Reset time in microseconds
 
 volatile int running = 1;
+uint32_t global_led_count = 60; // Default LED count
 
 void handle_signal(int sig) {
     running = 0;
@@ -212,10 +213,12 @@ int main(int argc, char *argv[]) {
         usleep(50000);
     }
     
-    // Turn off all LEDs before exiting
-    uint8_t *off_pixels = (uint8_t *)calloc(led_count * 3, 1);
-    ws2812_render(pin, off_pixels, led_count);
-    free(off_pixels);
+    // Turn off all LEDs before exiting using the global LED count
+    uint8_t *off_pixels = (uint8_t *)calloc(global_led_count * 3, 1);
+    if (off_pixels) {
+        ws2812_render(pin, off_pixels, global_led_count);
+        free(off_pixels);
+    }
     
     // Clean up
     gpioTerminate();
