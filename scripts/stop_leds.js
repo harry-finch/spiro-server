@@ -10,26 +10,13 @@ const driver = new WS2812Driver({
   simulation: false
 });
 
-// Create an array of all-off LEDs
-const offLEDs = Array(60).fill({ r: 0, g: 0, b: 0 });
+// Turn off all LEDs
+driver.stop();
 
-// Update with all LEDs off
-driver.update(offLEDs);
-
-// Wait a moment to ensure the update is sent
+// Give some time for the command to complete
 setTimeout(() => {
-  console.log('Stopping driver...');
-  
-  // Stop the driver
-  driver.stop();
-  
   console.log('LED cleanup complete');
-  
-  // Force exit after a short delay to ensure all processes have time to terminate
-  setTimeout(() => {
-    process.exit(0);
-  }, 500);
-  
+  process.exit(0);
 }, 1000);
 
 // Handle Ctrl+C

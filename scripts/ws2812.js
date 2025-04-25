@@ -1,19 +1,22 @@
-const ws281x = require('rpi-ws281x-native');
+const { spawn, execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-// WS2812 LED driver for Raspberry Pi using rpi-ws281x-native library
+// WS2812 LED driver for Raspberry Pi using the Python rpi_ws281x script
 class WS2812Driver {
   constructor(config) {
     this.ledCount = config.ledCount || 60;
     this.pin = config.pin || 18;
-    this._brightness = config.brightness || 100; // Store as percentage (0-100)
+    this._brightness = config.brightness || 100; // Store brightness as percentage (0-100)
     this.isSimulation = config.simulation || false;
-    this.channel = null;
+    this.pythonScript = path.join(__dirname, 'led_control_rpi_ws281x.py');
+    this.pythonProcess = null;
     
-    // Initialize the LED strip
+    // Initialize the LED strip (turn all LEDs off initially)
     this.initialize();
   }
   
-  // Initialize the rpi-ws281x library
+  // Initialize the LED strip
   initialize() {
     if (this.isSimulation) {
       console.log('Running in simulation mode - no hardware operations will be performed');
@@ -21,28 +24,18 @@ class WS2812Driver {
     }
     
     try {
-      // Initialize the library with our LED count
-      this.channel = ws281x.init(this.ledCount, {
-        // Options to match the pin used previously (GPIO 18 = PWM0 = 18)
-        gpio: this.pin,
-        // Set DMA to default (10)
-        dma: 10,
-        // Set brightness from 0-255
-        brightness: Math.round((this._brightness / 100) * 255),
-        // Set strip type (default is ws2812)
-        stripType: 'ws2812'
-      });
-      
-      // Initialize all LEDs to black (off)
-      this.pixelData = new Uint32Array(this.ledCount);
-      for(let i = 0; i < this.ledCount; i++) {
-        this.pixelData[i] = 0;
+      // Check if Python script exists
+      if (!fs.existsSync(this.pythonScript)) {
+        console.error(`Python script not found: ${this.pythonScript}`);
+        this.isSimulation = true;
+        return;
       }
-      ws281x.render(this.pixelData);
       
+      // Turn off all LEDs initially
+      this.setAllLEDs(0, 0, 0);
       console.log(`WS2812 LED strip initialized with ${this.ledCount} LEDs on GPIO pin ${this.pin}`);
     } catch (error) {
-      console.error('Failed to initialize rpi-ws281x library:', error);
+      console.error('Failed to initialize LED strip:', error);
       this.isSimulation = true;
     }
   }
@@ -56,22 +49,50 @@ class WS2812Driver {
   set brightness(value) {
     // Store brightness as percentage
     this._brightness = Math.max(0, Math.min(100, value));
+    console.log(`WS2812 brightness set to ${this._brightness}%`);
     
-    if (!this.isSimulation && this.channel !== null) {
-      // Apply to rpi-ws281x (which uses 0-255)
-      const brightnessValue = Math.round((this._brightness / 100) * 255);
-      ws281x.setBrightness(brightnessValue);
-      console.log(`WS2812 brightness set to ${this._brightness}% (${brightnessValue}/255)`);
+    // We'll apply brightness when we update the LEDs
+  }
+  
+  // Set all LEDs to a specific RGB color
+  setAllLEDs(r, g, b) {
+    if (this.isSimulation) {
+      console.log(`Simulation: Would set all LEDs to RGB(${r},${g},${b})`);
+      return;
+    }
+    
+    try {
+      // Convert RGB to hex string
+      const hexColor = this.rgbToHex(r, g, b);
+      
+      // Run the Python script
+      const result = execSync(`python3 ${this.pythonScript} ${hexColor} ${this.ledCount}`, { 
+        encoding: 'utf8',
+        timeout: 5000
+      });
+      
+      console.log(`Set all LEDs to ${hexColor}`);
+    } catch (error) {
+      console.error('Error setting LED colors:', error.message || error);
     }
   }
   
-  // Helper function to convert RGB components to color value
-  // rpi-ws281x expects colors in the format 0x00RRGGBB
-  rgbToColor(r, g, b) {
-    return ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
+  // Helper function to convert RGB to hex string
+  rgbToHex(r, g, b) {
+    // Apply brightness scaling
+    const brightnessScale = this._brightness / 100;
+    r = Math.floor(r * brightnessScale);
+    g = Math.floor(g * brightnessScale);
+    b = Math.floor(b * brightnessScale);
+    
+    // Convert to hex string
+    return '#' + 
+      r.toString(16).padStart(2, '0') + 
+      g.toString(16).padStart(2, '0') + 
+      b.toString(16).padStart(2, '0');
   }
   
-  // Update the LED strip with new colors
+  // Update the LED strip with new colors (array of {r, g, b} objects)
   update(ledData) {
     if (this.isSimulation) {
       console.log('Simulation: Would update LEDs with new data');
@@ -79,45 +100,28 @@ class WS2812Driver {
     }
     
     try {
-      if (!this.channel || !this.pixelData) {
-        // Reinitialize if needed
-        this.initialize();
-        if (this.isSimulation) return;
+      // For now, we'll just use the first LED's color for all LEDs
+      // This simplifies the integration with the Python script
+      if (ledData && ledData.length > 0) {
+        // Use the first LED's color for the entire strip
+        const led = ledData[0];
+        this.setAllLEDs(led.r, led.g, led.b);
       }
-      
-      // Apply the colors to the pixel data array
-      for (let i = 0; i < ledData.length && i < this.ledCount; i++) {
-        const led = ledData[i];
-        // rpi-ws281x uses a different color format
-        this.pixelData[i] = this.rgbToColor(led.r, led.g, led.b);
-      }
-      
-      // Render the updates to the LED strip
-      ws281x.render(this.pixelData);
-      console.log(`Updated ${ledData.length} LEDs on GPIO pin ${this.pin}`);
     } catch (error) {
       console.error('Error updating WS2812 LEDs:', error);
     }
   }
   
-  // Stop the LED driver and clean up
+  // Stop the LED driver and turn off all LEDs
   stop() {
-    if (!this.isSimulation && this.channel !== null) {
-      try {
-        // Turn off all LEDs
-        for (let i = 0; i < this.ledCount; i++) {
-          this.pixelData[i] = 0;
-        }
-        ws281x.render(this.pixelData);
-        
-        // Reset the library
-        ws281x.reset();
-        console.log('WS2812 driver stopped and LEDs turned off');
-      } catch (error) {
-        console.error('Error stopping WS2812 driver:', error);
-      } finally {
-        this.channel = null;
-      }
+    if (this.isSimulation) return;
+    
+    try {
+      // Turn off all LEDs
+      this.setAllLEDs(0, 0, 0);
+      console.log('WS2812 driver stopped and LEDs turned off');
+    } catch (error) {
+      console.error('Error stopping WS2812 driver:', error);
     }
   }
 }

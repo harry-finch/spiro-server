@@ -183,16 +183,19 @@ function setPattern(pattern) {
     case 'rainbow':
       let offset = 0;
       patternInterval = setInterval(() => {
+        // For our Python-based implementation, we'll use a single color for the entire strip
+        // and change it gradually for a rainbow effect
+        const hue = (offset % 360) / 360;
+        const { r, g, b } = hsvToRgb(hue, 1, 1);
+        
+        // Apply brightness
+        const brightnessScale = currentBrightness / 100;
+        const scaledR = Math.floor(r * brightnessScale);
+        const scaledG = Math.floor(g * brightnessScale);
+        const scaledB = Math.floor(b * brightnessScale);
+        
+        // Set all LEDs to this single color
         for (let i = 0; i < config.ledCount; i++) {
-          const hue = ((i + offset) % 360) / 360;
-          const { r, g, b } = hsvToRgb(hue, 1, 1);
-          
-          // Apply brightness
-          const brightnessScale = currentBrightness / 100;
-          const scaledR = Math.floor(r * brightnessScale);
-          const scaledG = Math.floor(g * brightnessScale);
-          const scaledB = Math.floor(b * brightnessScale);
-          
           virtualLEDs[i] = { r: scaledR, g: scaledG, b: scaledB };
         }
         
@@ -201,7 +204,7 @@ function setPattern(pattern) {
           console.log('Hardware: Updating rainbow pattern');
         }
         
-        offset = (offset + 1) % 360;
+        offset = (offset + 10) % 360; // Faster color change
       }, 50);
       break;
       
@@ -241,53 +244,59 @@ function setPattern(pattern) {
       break;
       
     case 'chase':
-      let position = 0;
-      patternInterval = setInterval(() => {
-        // Turn off all LEDs
-        for (let i = 0; i < config.ledCount; i++) {
-          virtualLEDs[i] = { r: 0, g: 0, b: 0 };
-        }
-        
-        // Turn on just the current position
-        const brightnessScale = currentBrightness / 100;
-        const r = Math.floor(currentColor.r * brightnessScale);
-        const g = Math.floor(currentColor.g * brightnessScale);
-        const b = Math.floor(currentColor.b * brightnessScale);
-        
-        virtualLEDs[position] = { r, g, b };
-        
-        if (!config.simulation) {
-          sendToHardware(virtualLEDs);
-          console.log(`Hardware: Chase at position ${position}`);
-        }
-        
-        position = (position + 1) % config.ledCount;
-      }, 50);
-      break;
-      
-    case 'alternating':
-      let state = false;
+      // For our Python script implementation, we'll adapt the chase pattern
+      // to blink all LEDs on and off
+      let isOn = false;
       patternInterval = setInterval(() => {
         const brightnessScale = currentBrightness / 100;
-        const r = Math.floor(currentColor.r * brightnessScale);
-        const g = Math.floor(currentColor.g * brightnessScale);
-        const b = Math.floor(currentColor.b * brightnessScale);
         
         for (let i = 0; i < config.ledCount; i++) {
-          if ((i % 2 === 0 && state) || (i % 2 !== 0 && !state)) {
+          if (isOn) {
+            // Turn all LEDs on
+            const r = Math.floor(currentColor.r * brightnessScale);
+            const g = Math.floor(currentColor.g * brightnessScale);
+            const b = Math.floor(currentColor.b * brightnessScale);
             virtualLEDs[i] = { r, g, b };
           } else {
+            // Turn all LEDs off
             virtualLEDs[i] = { r: 0, g: 0, b: 0 };
           }
         }
         
         if (!config.simulation) {
           sendToHardware(virtualLEDs);
-          console.log(`Hardware: Alternating pattern state: ${state}`);
+          console.log(`Hardware: Blinking ${isOn ? 'ON' : 'OFF'}`);
         }
         
-        state = !state;
-      }, 500);
+        isOn = !isOn;
+      }, 500); // Slower blink interval for better visibility
+      break;
+      
+    case 'alternating':
+      // For our Python script implementation, we'll adapt the alternating pattern
+      // to alternate between normal brightness and half brightness
+      let normalBrightness = true;
+      patternInterval = setInterval(() => {
+        const brightnessScale = currentBrightness / 100;
+        // Use either full or half brightness
+        const intensity = normalBrightness ? 1.0 : 0.5;
+        
+        const r = Math.floor(currentColor.r * brightnessScale * intensity);
+        const g = Math.floor(currentColor.g * brightnessScale * intensity);
+        const b = Math.floor(currentColor.b * brightnessScale * intensity);
+        
+        // Set all LEDs to the same color
+        for (let i = 0; i < config.ledCount; i++) {
+          virtualLEDs[i] = { r, g, b };
+        }
+        
+        if (!config.simulation) {
+          sendToHardware(virtualLEDs);
+          console.log(`Hardware: Alternating pattern brightness: ${normalBrightness ? 'FULL' : 'HALF'}`);
+        }
+        
+        normalBrightness = !normalBrightness;
+      }, 1000); // Slower change for better visibility
       break;
       
     default:
