@@ -9,7 +9,18 @@ class WS2812Driver {
     this.pin = config.pin || 18;
     this._brightness = config.brightness || 100; // Store brightness as percentage (0-100)
     this.isSimulation = config.simulation || false;
+    
+    // Full path to the Python script
     this.pythonScript = path.join(__dirname, 'led_control_rpi_ws281x.py');
+    console.log(`Python script path: ${this.pythonScript}`);
+    
+    // Check if the script exists and log the result
+    if (fs.existsSync(this.pythonScript)) {
+      console.log('Python script found at the specified path');
+    } else {
+      console.warn('WARNING: Python script NOT found at the specified path');
+    }
+    
     this.pythonProcess = null;
     
     // Initialize the LED strip (turn all LEDs off initially)
@@ -65,13 +76,20 @@ class WS2812Driver {
       // Convert RGB to hex string
       const hexColor = this.rgbToHex(r, g, b);
       
-      // Run the Python script
-      const result = execSync(`python3 ${this.pythonScript} ${hexColor} ${this.ledCount}`, { 
+      // Construct the command
+      const command = `python3 ${this.pythonScript} "${hexColor}" ${this.ledCount}`;
+      console.log(`Executing: ${command}`);
+      
+      // Run the Python script with the color in quotes
+      const result = execSync(command, { 
         encoding: 'utf8',
         timeout: 5000
       });
       
       console.log(`Set all LEDs to ${hexColor}`);
+      if (result) {
+        console.log(`Python script output: ${result}`);
+      }
     } catch (error) {
       console.error('Error setting LED colors:', error.message || error);
     }
@@ -81,15 +99,19 @@ class WS2812Driver {
   rgbToHex(r, g, b) {
     // Apply brightness scaling
     const brightnessScale = this._brightness / 100;
-    r = Math.floor(r * brightnessScale);
-    g = Math.floor(g * brightnessScale);
-    b = Math.floor(b * brightnessScale);
+    r = Math.min(255, Math.max(0, Math.floor(r * brightnessScale)));
+    g = Math.min(255, Math.max(0, Math.floor(g * brightnessScale)));
+    b = Math.min(255, Math.max(0, Math.floor(b * brightnessScale)));
     
-    // Convert to hex string
-    return '#' + 
-      r.toString(16).padStart(2, '0') + 
-      g.toString(16).padStart(2, '0') + 
-      b.toString(16).padStart(2, '0');
+    // Convert to hex string with proper padding
+    const rHex = r.toString(16).padStart(2, '0');
+    const gHex = g.toString(16).padStart(2, '0');
+    const bHex = b.toString(16).padStart(2, '0');
+    
+    console.log(`RGB(${r},${g},${b}) -> HEX: #${rHex}${gHex}${bHex}`);
+    
+    // Return hex color with # prefix
+    return '#' + rHex + gHex + bHex;
   }
   
   // Update the LED strip with new colors (array of {r, g, b} objects)
