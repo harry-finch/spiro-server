@@ -1,6 +1,3 @@
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
 const WS2812Driver = require('./ws2812');
 
 console.log('Stopping all LED processes and turning off LEDs...');
@@ -26,44 +23,13 @@ setTimeout(() => {
   // Stop the driver
   driver.stop();
   
-  // More aggressive cleanup with multiple approaches
-  const cleanupSteps = [
-    // Kill any existing ws2812_driver processes
-    'pkill -f ws2812_driver',
-    // Force kill with -9 if needed
-    'pkill -9 -f ws2812_driver 2>/dev/null || true',
-    // Use sudo killall as another approach
-    'sudo killall ws2812_driver 2>/dev/null || true',
-    'sudo killall -9 ws2812_driver 2>/dev/null || true',
-    // Try to stop pigpiod
-    'sudo killall pigpiod 2>/dev/null || true',
-    // Remove any lock files
-    'sudo rm -f /var/run/pigpio.pid /dev/shm/pigpio* /var/run/pigpio.sock 2>/dev/null || true'
-  ];
+  console.log('LED cleanup complete');
   
-  // Execute cleanup steps in sequence
-  function runNextCleanupStep(index) {
-    if (index >= cleanupSteps.length) {
-      console.log('LED cleanup complete');
-      
-      // Force exit after a short delay to ensure all processes have time to terminate
-      setTimeout(() => {
-        process.exit(0);
-      }, 500);
-      return;
-    }
-    
-    const cmd = cleanupSteps[index];
-    console.log(`Running cleanup step: ${cmd}`);
-    
-    exec(cmd, (error) => {
-      // Ignore errors and continue with next step
-      runNextCleanupStep(index + 1);
-    });
-  }
+  // Force exit after a short delay to ensure all processes have time to terminate
+  setTimeout(() => {
+    process.exit(0);
+  }, 500);
   
-  // Start the cleanup sequence
-  runNextCleanupStep(0);
 }, 1000);
 
 // Handle Ctrl+C

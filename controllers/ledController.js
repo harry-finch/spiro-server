@@ -376,32 +376,11 @@ function cleanup() {
         // Try to stop the driver gracefully
         ws2812Driver.stop();
         
-        // More thorough cleanup
-        const cleanupCommands = [
-          'pkill -f ws2812_driver',
-          'pkill -9 -f ws2812_driver 2>/dev/null || true',
-          'sudo killall ws2812_driver 2>/dev/null || true',
-          'sudo killall -9 ws2812_driver 2>/dev/null || true'
-        ];
-        
-        // Execute commands in sequence
-        function runNextCommand(index) {
-          if (index >= cleanupCommands.length) {
-            clearTimeout(stopTimeout);
-            ws2812Driver = null;
-            console.log('Hardware: Turned off all LEDs and reset driver');
-            resolve();
-            return;
-          }
-          
-          exec(cleanupCommands[index], () => {
-            // Ignore errors and continue with next command
-            runNextCommand(index + 1);
-          });
-        }
-        
-        // Start the cleanup sequence
-        runNextCommand(0);
+        // Clear the timeout once the driver is stopped
+        clearTimeout(stopTimeout);
+        ws2812Driver = null;
+        console.log('Hardware: Turned off all LEDs and reset driver');
+        resolve();
       } catch (error) {
         console.error('Error during LED cleanup:', error);
         ws2812Driver = null;
