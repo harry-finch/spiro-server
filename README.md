@@ -2,6 +2,8 @@
 
 A Node.js Express server for controlling RGB LED strips and camera on a Raspberry Pi.
 
+This project is a simplified fork of [Spiro by Alyona Minina](https://www.alyonaminina.org/spiro), which was originally designed for scientific imaging in plant biology research.
+
 ## Overview
 
 This project provides a web interface to control:
@@ -68,20 +70,43 @@ sudo apt install -y git build-essential python3-pip
 echo "imx219" | sudo tee -a /etc/modules
 ```
 
-2. Install and build rpicam-apps (required for camera functionality):
+2. Build and install libcamera (required for camera functionality):
 ```bash
 # Install dependencies
 sudo apt install -y libcamera-dev libepoxy-dev libjpeg-dev libtiff5-dev
 sudo apt install -y python3-pip python3-picamera2 python3-matplotlib
 sudo apt install -y cmake libboost-dev libgnutls28-dev openssl libtiff5-dev 
 sudo apt install -y qtbase5-dev libqt5core5a libqt5gui5 libqt5widgets5
-sudo apt install -y meson
+sudo apt install -y meson ninja-build
 sudo pip3 install pyyaml ply
 
-# Clone and build rpicam-apps
+# Clone and build libcamera
+cd ~
+git clone https://git.linuxtv.org/libcamera.git
+cd libcamera
+meson build
+cd build
+ninja
+sudo ninja install
+```
+
+3. Build and install rpicam-apps with necessary modifications:
+```bash
+# Clone rpicam-apps
 cd ~
 git clone https://github.com/raspberrypi/rpicam-apps.git
 cd rpicam-apps
+
+# Apply fix for audio codec issue
+nano encoder/libav_encoder.cpp
+# Find the entire initAudioOutCodec function (around line 323) and replace it with:
+# void LibAvEncoder::initAudioOutCodec(const VideoOptions* options, const StreamInfo& info)
+# {
+#     // Audio encoding disabled
+#     return;
+# }
+
+# Build rpicam-apps
 meson build
 cd build
 meson compile
@@ -90,6 +115,8 @@ sudo meson install
 # Ensure camera permissions
 sudo usermod -a -G video $USER
 ```
+
+For more details on building rpicam-apps on Ubuntu 22.04, see [this guide on AskUbuntu](https://askubuntu.com/questions/1542652/getting-rpicam-tools-rpicam-apps-working-on-ubuntu-22-04-lts-for-the-raspber).
 
 3. Install Python library for LED control:
 ```bash
