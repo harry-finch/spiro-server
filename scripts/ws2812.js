@@ -42,9 +42,9 @@ class WS2812Driver {
         return;
       }
       
-      // Turn off all LEDs initially
-      this.setAllLEDs(0, 0, 0);
-      console.log(`WS2812 LED strip initialized with ${this.ledCount} LEDs on GPIO pin ${this.pin}`);
+      // Turn on all LEDs to full bright white initially
+      this.setAllLEDs(255, 255, 255);
+      console.log(`WS2812 LED strip initialized with ${this.ledCount} LEDs on GPIO pin ${this.pin} - set to full bright white`);
     } catch (error) {
       console.error('Failed to initialize LED strip:', error);
       this.isSimulation = true;

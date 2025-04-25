@@ -15,7 +15,7 @@ const config = {
 };
 
 // LED strip state
-let currentColor = { r: 0, g: 0, b: 0 };
+let currentColor = { r: 255, g: 255, b: 255 }; // Start with white
 let currentBrightness = config.brightness;
 let currentPattern = 'solid';
 let patternInterval = null;
@@ -24,13 +24,9 @@ let isReady = false;
 // Virtual LED strip for simulation
 let virtualLEDs = Array(config.ledCount).fill({ r: 0, g: 0, b: 0 });
 
-// Available patterns
+// Available patterns - only solid color now
 const patterns = {
-  solid: { name: 'Solid Color', description: 'Display a single color' },
-  rainbow: { name: 'Rainbow', description: 'Cycle through rainbow colors' },
-  pulse: { name: 'Pulse', description: 'Pulse the current color' },
-  chase: { name: 'Chase', description: 'Chase effect with current color' },
-  alternating: { name: 'Alternating', description: 'Alternate between two colors' }
+  solid: { name: 'Solid Color', description: 'Display a single color' }
 };
 
 // Hardware-specific variables
@@ -68,13 +64,13 @@ function init() {
         console.log(`WS2812 LED strip initialized on GPIO pin ${config.pin}`);
       }
       
-      // Set all LEDs to off initially
+      // Set all LEDs to white initially
       for (let i = 0; i < config.ledCount; i++) {
-        virtualLEDs[i] = { r: 0, g: 0, b: 0 };
+        virtualLEDs[i] = { r: 255, g: 255, b: 255 };
       }
       
-      // Turn off all LEDs
-      setColor(0, 0, 0);
+      // Turn on all LEDs to white
+      setColor(255, 255, 255);
       
       isReady = true;
       console.log('LED controller initialized successfully');

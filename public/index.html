@@ -24,25 +24,22 @@
           <h2>LED Control</h2>
           
           <div class="control-group">
-            <label for="color-picker">Color:</label>
-            <input type="color" id="color-picker" value="#ff0000">
+            <label>Basic Colors:</label>
+            <div class="color-buttons">
+              <button id="white-btn" class="color-btn" style="background-color: white; color: black;">White</button>
+              <button id="red-btn" class="color-btn" style="background-color: #ff0000;">Red</button>
+              <button id="green-btn" class="color-btn" style="background-color: #00ff00;">Green</button>
+              <button id="blue-btn" class="color-btn" style="background-color: #0000ff;">Blue</button>
+              <button id="yellow-btn" class="color-btn" style="background-color: #ffff00; color: black;">Yellow</button>
+              <button id="cyan-btn" class="color-btn" style="background-color: #00ffff; color: black;">Cyan</button>
+              <button id="magenta-btn" class="color-btn" style="background-color: #ff00ff;">Magenta</button>
+            </div>
           </div>
           
           <div class="control-group">
             <label for="brightness-slider">Brightness:</label>
-            <input type="range" id="brightness-slider" min="0" max="255" value="255">
-            <span id="brightness-value">255</span>
-          </div>
-          
-          <div class="control-group">
-            <label for="pattern-select">Pattern:</label>
-            <select id="pattern-select">
-              <option value="solid">Solid Color</option>
-              <option value="rainbow">Rainbow</option>
-              <option value="pulse">Pulse</option>
-              <option value="chase">Chase</option>
-              <option value="alternating">Alternating</option>
-            </select>
+            <input type="range" id="brightness-slider" min="0" max="100" value="100">
+            <span id="brightness-value">100</span>
           </div>
           
           <button id="led-off-btn" class="btn danger">Turn Off LEDs</button>

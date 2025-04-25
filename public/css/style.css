@@ -137,6 +137,34 @@ input[type="color"] {
   background-color: var(--surface-color);
 }
 
+.color-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.color-btn {
+  width: 70px;
+  height: 40px;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.color-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 8px var(--shadow-color);
+}
+
+.color-btn.active {
+  border: 3px solid var(--text-primary);
+  box-shadow: 0 0 10px var(--primary-color);
+}
+
 input[type="range"] {
   width: 80%;
   margin-right: 10px;

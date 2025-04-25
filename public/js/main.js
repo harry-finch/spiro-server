@@ -1,10 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
   const connectionStatus = document.getElementById('connection-status');
-  const colorPicker = document.getElementById('color-picker');
   const brightnessSlider = document.getElementById('brightness-slider');
   const brightnessValue = document.getElementById('brightness-value');
-  const patternSelect = document.getElementById('pattern-select');
   const ledOffBtn = document.getElementById('led-off-btn');
   const cameraImage = document.getElementById('camera-image');
   const takePictureBtn = document.getElementById('take-picture-btn');
@@ -13,6 +11,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const imageGallery = document.getElementById('image-gallery');
   const serverTime = document.getElementById('server-time');
   const themeToggle = document.getElementById('theme-toggle');
+  
+  // Color buttons
+  const whiteBtn = document.getElementById('white-btn');
+  const redBtn = document.getElementById('red-btn');
+  const greenBtn = document.getElementById('green-btn');
+  const blueBtn = document.getElementById('blue-btn');
+  const yellowBtn = document.getElementById('yellow-btn');
+  const cyanBtn = document.getElementById('cyan-btn');
+  const magentaBtn = document.getElementById('magenta-btn');
+  
+  // Color values
+  const colorValues = {
+    white: { r: 255, g: 255, b: 255 },
+    red: { r: 255, g: 0, b: 0 },
+    green: { r: 0, g: 255, b: 0 },
+    blue: { r: 0, g: 0, b: 255 },
+    yellow: { r: 255, g: 255, b: 0 },
+    cyan: { r: 0, g: 255, b: 255 },
+    magenta: { r: 255, g: 0, b: 255 }
+  };
+  
+  let activeColorButton = whiteBtn; // Default to white
   
   // Socket.io connection
   const socket = io();
@@ -37,49 +57,68 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(response => response.json())
       .then(data => {
         if (data.ledStatus) {
-          const { color, brightness, pattern } = data.ledStatus;
-          
-          // Update color picker
-          const hexColor = rgbToHex(color.r, color.g, color.b);
-          colorPicker.value = hexColor;
+          const { brightness } = data.ledStatus;
           
           // Update brightness slider
           brightnessSlider.value = brightness;
           brightnessValue.textContent = brightness;
           
-          // Update pattern select
-          patternSelect.value = pattern;
+          // By default, set to white on startup (even though LEDs are already white)
+          setActiveColorButton(whiteBtn);
         }
       })
       .catch(error => console.error('Error fetching status:', error));
-    
-    // Get available patterns
-    fetch('/api/led/patterns')
-      .then(response => response.json())
-      .then(data => {
-        if (data.patterns) {
-          // Clear existing options
-          patternSelect.innerHTML = '';
-          
-          // Add options for each pattern
-          Object.entries(data.patterns).forEach(([value, pattern]) => {
-            const option = document.createElement('option');
-            option.value = value;
-            option.textContent = pattern.name;
-            patternSelect.appendChild(option);
-          });
-        }
-      })
-      .catch(error => console.error('Error fetching patterns:', error));
     
     // Load image gallery
     loadImageGallery();
   }
   
-  // LED Control Events
-  colorPicker.addEventListener('change', () => {
-    const rgb = hexToRgb(colorPicker.value);
-    setLedColor(rgb.r, rgb.g, rgb.b);
+  // Make a color button active
+  function setActiveColorButton(button) {
+    // Remove active class from current active button
+    if (activeColorButton) {
+      activeColorButton.classList.remove('active');
+    }
+    
+    // Set new active button
+    activeColorButton = button;
+    activeColorButton.classList.add('active');
+  }
+  
+  // LED Control Events - Color Buttons
+  whiteBtn.addEventListener('click', () => {
+    setActiveColorButton(whiteBtn);
+    setLedColor(colorValues.white.r, colorValues.white.g, colorValues.white.b);
+  });
+  
+  redBtn.addEventListener('click', () => {
+    setActiveColorButton(redBtn);
+    setLedColor(colorValues.red.r, colorValues.red.g, colorValues.red.b);
+  });
+  
+  greenBtn.addEventListener('click', () => {
+    setActiveColorButton(greenBtn);
+    setLedColor(colorValues.green.r, colorValues.green.g, colorValues.green.b);
+  });
+  
+  blueBtn.addEventListener('click', () => {
+    setActiveColorButton(blueBtn);
+    setLedColor(colorValues.blue.r, colorValues.blue.g, colorValues.blue.b);
+  });
+  
+  yellowBtn.addEventListener('click', () => {
+    setActiveColorButton(yellowBtn);
+    setLedColor(colorValues.yellow.r, colorValues.yellow.g, colorValues.yellow.b);
+  });
+  
+  cyanBtn.addEventListener('click', () => {
+    setActiveColorButton(cyanBtn);
+    setLedColor(colorValues.cyan.r, colorValues.cyan.g, colorValues.cyan.b);
+  });
+  
+  magentaBtn.addEventListener('click', () => {
+    setActiveColorButton(magentaBtn);
+    setLedColor(colorValues.magenta.r, colorValues.magenta.g, colorValues.magenta.b);
   });
   
   brightnessSlider.addEventListener('input', () => {
@@ -88,13 +127,13 @@ document.addEventListener('DOMContentLoaded', () => {
     setLedBrightness(brightness);
   });
   
-  patternSelect.addEventListener('change', () => {
-    setLedPattern(patternSelect.value);
-  });
-  
   ledOffBtn.addEventListener('click', () => {
     setLedColor(0, 0, 0);
-    colorPicker.value = '#000000';
+    // Don't set any color button as active
+    if (activeColorButton) {
+      activeColorButton.classList.remove('active');
+      activeColorButton = null;
+    }
   });
   
   // Camera Control Events
@@ -117,18 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   // Socket.io event handlers
-  socket.on('led:colorChanged', (data) => {
-    const hexColor = rgbToHex(data.r, data.g, data.b);
-    colorPicker.value = hexColor;
-  });
-  
   socket.on('led:brightnessChanged', (brightness) => {
     brightnessSlider.value = brightness;
     brightnessValue.textContent = brightness;
-  });
-  
-  socket.on('led:patternChanged', (pattern) => {
-    patternSelect.value = pattern;
   });
   
   socket.on('camera:pictureTaken', (data) => {
@@ -184,17 +214,6 @@ document.addEventListener('DOMContentLoaded', () => {
       body: JSON.stringify({ brightness })
     })
       .catch(error => console.error('Error setting LED brightness:', error));
-  }
-  
-  function setLedPattern(pattern) {
-    fetch('/api/led/pattern', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ pattern })
-    })
-      .catch(error => console.error('Error setting LED pattern:', error));
   }
   
   // Camera Control Functions
@@ -268,20 +287,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  // Utility Functions
-  function rgbToHex(r, g, b) {
-    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-  }
-  
-  function hexToRgb(hex) {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16)
-    } : { r: 0, g: 0, b: 0 };
-  }
-  
   // Update server time
   function updateServerTime() {
     const now = new Date();
@@ -311,4 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
       themeToggle.textContent = '🌙 Dark Mode';
     }
   });
+  
+  // Highlight the white button as active on page load (since LEDs start as white)
+  setActiveColorButton(whiteBtn);
 });
